@@ -1,0 +1,41 @@
+{
+  "name": "answerdeck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25 || >=26 <27",
+    "npm": ">=11"
+  },
+  "scripts": {
+    "dev": "tsx src/server/server.ts",
+    "build": "tsc --noEmit && vite build",
+    "start": "NODE_ENV=production tsx src/server/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "audit": "npm audit --audit-level=moderate"
+  },
+  "dependencies": {
+    "express": "5.1.0",
+    "lucide-react": "1.19.0",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "recharts": "3.7.0",
+    "zod": "4.4.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.1",
+    "@types/express": "5.0.4",
+    "@types/node": "24.13.2",
+    "@types/react": "19.2.15",
+    "@types/react-dom": "19.2.1",
+    "@vitejs/plugin-react": "5.0.2",
+    "jsdom": "29.0.2",
+    "playwright": "1.59.1",
+    "tsx": "4.22.2",
+    "typescript": "5.9.3",
+    "vite": "6.4.3",
+    "vitest": "4.1.7"
+  }
+}

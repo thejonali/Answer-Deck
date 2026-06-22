@@ -1,0 +1,110 @@
+1
+True/False
+CORRECT
+1/1
+Grade: 1 out of 1 point possible
+
+Active recall is more effective when learners retrieve information before checking notes.
+
+    TrueCorrect answer
+    False
+
+Question 2
+2
+Multiple Choice
+CORRECT
+1/1
+Grade: 1 out of 1 point possible
+
+Which approach best supports long-term retention?
+
+    Option A
+
+    Rereading the same paragraph several times in one sitting
+
+    Option B
+
+    Highlighting every sentence in a chapter
+
+    Option C
+
+    Correct:
+
+    Spacing review sessions across multiple days
+    Correct answer
+
+    Option D
+
+    Studying only on the night before an exam
+
+Question 3
+3
+Multiple Choice
+CORRECT
+1/1
+Grade: 1 out of 1 point possible
+
+What is the main benefit of summarizing a section in your own words?
+
+    Option A
+
+    It replaces the need to check accuracy
+
+    Option B
+
+    Correct:
+
+    It reveals whether the idea was understood well enough to explain
+    Correct answer
+
+    Option C
+
+    It guarantees every detail has been memorized
+
+    Option D
+
+    It makes diagrams unnecessary
+
+    Option E
+
+    It removes the need for later review
+
+Question 4
+4
+True/False
+CORRECT
+1/1
+Grade: 1 out of 1 point possible
+
+A useful study plan should avoid breaks so concentration never resets.
+
+    True
+    FalseCorrect answer
+
+Question 5
+5
+Multiple Choice
+CORRECT
+1/1
+Grade: 1 out of 1 point possible
+
+When reviewing missed questions, what should be saved with the answer?
+
+    Option A
+
+    Only the final score
+
+    Option B
+
+    Correct:
+
+    The reason the selected answer was wrong
+    Correct answer
+
+    Option C
+
+    The color of the original worksheet
+
+    Option D
+
+    The number of minutes until the next class
