@@ -25,18 +25,25 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      - name: Show versions
+        run: |
+          node --version
+          npm --version
+
       - name: Install dependencies
         run: npm ci
         timeout-minutes: 5
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Show Playwright version
+        run: npx --no-install playwright --version
 
-      - name: Install Playwright browser
-        run: npx --no-install playwright install --with-deps chromium
+      - name: Install Playwright system dependencies only
+        run: npx --no-install playwright install-deps chromium
+        timeout-minutes: 8
+
+      - name: Install Chromium without shell progress bar
+        run: |
+          CI=1 PLAYWRIGHT_BROWSERS_PATH=0 npx --no-install playwright install chromium
         timeout-minutes: 10
 
       - name: Run unit tests
