@@ -6,6 +6,8 @@ import { Metric } from "../components/Metric";
 import { calculateQuizResult, formatDuration, shuffleArray } from "../../shared/stats";
 import type { QuizAnswerInput, StoredChapter, StoredClass, StoredQuestion } from "../../shared/types";
 
+const quickQuestionLimits = [10, 20, 30, 50];
+
 export function QuizTool({
   classesVersion,
   onSessionSaved
@@ -16,8 +18,10 @@ export function QuizTool({
   const [classes, setClasses] = useState<StoredClass[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null);
   const [selectedChapterIds, setSelectedChapterIds] = useState<number[]>([]);
+  const [includeAllQuestions, setIncludeAllQuestions] = useState(true);
   const [questionLimit, setQuestionLimit] = useState(20);
   const [shuffle, setShuffle] = useState(true);
+  const [scrambleAnswers, setScrambleAnswers] = useState(true);
   const [quizQuestions, setQuizQuestions] = useState<StoredQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<QuizAnswerInput[]>([]);
@@ -33,6 +37,11 @@ export function QuizTool({
 
   const selectedClass = classes.find((item) => item.id === selectedClassId) ?? null;
   const selectedChapters = selectedClass?.chapters.filter((chapter) => selectedChapterIds.includes(chapter.id)) ?? [];
+  const selectedQuestionCount = selectedChapters.reduce((sum, chapter) => sum + chapter.questionCount, 0);
+  const normalizedQuestionLimit = Math.max(1, Math.floor(questionLimit) || 20);
+  const sessionQuestionCount = includeAllQuestions
+    ? selectedQuestionCount
+    : Math.min(normalizedQuestionLimit, selectedQuestionCount);
   const currentQuestion = quizQuestions[currentIndex];
   const currentAnswer = answers.find((answer) => answer.questionId === currentQuestion?.id);
 
@@ -44,12 +53,19 @@ export function QuizTool({
     try {
       const loaded = await getQuestions(selectedClassId, selectedChapterIds);
       const ordered = shuffle ? shuffleArray(loaded) : loaded;
-      const limited = ordered.slice(0, Math.min(questionLimit, loaded.length));
+      const limited = includeAllQuestions ? ordered : ordered.slice(0, Math.min(normalizedQuestionLimit, ordered.length));
+      const answerSeed = Date.now();
+      const prepared = scrambleAnswers
+        ? limited.map((question, index) => ({
+            ...question,
+            choices: shuffleArray(question.choices, answerSeed + question.id + index)
+          }))
+        : limited;
       if (limited.length === 0) {
         setError("No questions are available for this selection.");
         return;
       }
-      setQuizQuestions(limited);
+      setQuizQuestions(prepared);
       setCurrentIndex(0);
       setAnswers([]);
       setSelectedChoiceId(null);
@@ -158,58 +174,147 @@ export function QuizTool({
       {error && <div className="notice error">{error}</div>}
 
       {quizQuestions.length === 0 ? (
-        <section className="panel quiz-setup">
-          <div className="field-grid">
-            <label>
-              Class
-              <select
-                value={selectedClassId ?? ""}
-                onChange={(event) => {
-                  setSelectedClassId(Number(event.target.value) || null);
-                  setSelectedChapterIds([]);
-                }}
-              >
-                <option value="">Choose class</option>
-                {classes.map((item) => (
-                  <option value={item.id} key={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Question limit
-              <input
-                type="number"
-                min={1}
-                value={questionLimit}
-                onChange={(event) => setQuestionLimit(Number(event.target.value))}
-              />
-            </label>
-          </div>
-          <div className="chapter-picker">
-            {selectedClass?.chapters.map((chapter) => (
-              <label className="chapter-option" key={chapter.id}>
-                <input
-                  type="checkbox"
-                  checked={selectedChapterIds.includes(chapter.id)}
-                  onChange={(event) => {
-                    setSelectedChapterIds((current) =>
-                      event.target.checked
-                        ? [...current, chapter.id]
-                        : current.filter((chapterId) => chapterId !== chapter.id)
+        <section className="panel quiz-setup guided-setup">
+          <div className="setup-builder">
+            <div className="setup-main">
+              <div className="setup-control-row">
+                <label>
+                  Class
+                  <select
+                    value={selectedClassId ?? ""}
+                    onChange={(event) => {
+                      setSelectedClassId(Number(event.target.value) || null);
+                      setSelectedChapterIds([]);
+                    }}
+                  >
+                    <option value="">Choose class</option>
+                    {classes.map((item) => (
+                      <option value={item.id} key={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="count-control">
+                  <span className="control-label">Question count</span>
+                  <div className="segmented-control count-mode" role="group" aria-label="Question count">
+                    <button
+                      type="button"
+                      className={includeAllQuestions ? "active" : ""}
+                      aria-pressed={includeAllQuestions}
+                      onClick={() => setIncludeAllQuestions(true)}
+                    >
+                      All questions
+                    </button>
+                    <button
+                      type="button"
+                      className={!includeAllQuestions ? "active" : ""}
+                      aria-pressed={!includeAllQuestions}
+                      onClick={() => setIncludeAllQuestions(false)}
+                    >
+                      Custom limit
+                    </button>
+                  </div>
+                  {!includeAllQuestions && (
+                    <div className="limit-control">
+                      <label>
+                        Limit
+                        <input
+                          type="number"
+                          min={1}
+                          max={selectedQuestionCount || undefined}
+                          value={questionLimit}
+                          onChange={(event) => setQuestionLimit(Number(event.target.value))}
+                        />
+                      </label>
+                      <div className="quick-limit-row" aria-label="Quick question presets">
+                        {quickQuestionLimits.map((limit) => (
+                          <button
+                            type="button"
+                            className={normalizedQuestionLimit === limit ? "active" : ""}
+                            key={limit}
+                            onClick={() => setQuestionLimit(limit)}
+                          >
+                            {limit}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="chapter-section">
+                <span className="control-label">Chapters</span>
+                <div className="chapter-picker">
+                  {selectedClass?.chapters.map((chapter) => {
+                    const isSelected = selectedChapterIds.includes(chapter.id);
+                    return (
+                      <label className={`chapter-option ${isSelected ? "selected" : ""}`} key={chapter.id}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(event) => {
+                            setSelectedChapterIds((current) =>
+                              event.target.checked
+                                ? [...current, chapter.id]
+                                : current.filter((chapterId) => chapterId !== chapter.id)
+                            );
+                          }}
+                        />
+                        <span>{chapter.name}</span>
+                        <em>{chapter.questionCount}</em>
+                      </label>
                     );
+                  })}
+                </div>
+                {!selectedClass && <p className="muted">Choose a class to select chapters.</p>}
+              </div>
+            </div>
+
+            <aside className="session-summary-panel">
+              <h3>Session summary</h3>
+              <div className="summary-stats compact-summary">
+                <Metric label="Questions" value={sessionQuestionCount} />
+                <Metric
+                  label={includeAllQuestions ? "Chapters" : "Available"}
+                  value={includeAllQuestions ? selectedChapters.length : selectedQuestionCount}
+                />
+              </div>
+              <div className="setup-meter" aria-hidden="true">
+                <span
+                  style={{
+                    width:
+                      selectedQuestionCount === 0
+                        ? "0%"
+                        : `${Math.max(3, Math.min(100, (sessionQuestionCount / selectedQuestionCount) * 100))}%`
                   }}
                 />
-                <span>{chapter.name}</span>
-                <em>{chapter.questionCount}</em>
+              </div>
+              <label className="summary-toggle">
+                <span>
+                  <strong>Shuffle questions</strong>
+                  <em>
+                    {includeAllQuestions
+                      ? "Randomize question order"
+                      : `Draw ${sessionQuestionCount} questions from selected chapters`}
+                  </em>
+                </span>
+                <input type="checkbox" checked={shuffle} onChange={(event) => setShuffle(event.target.checked)} />
               </label>
-            ))}
+              <label className="summary-toggle">
+                <span>
+                  <strong>Scramble answers</strong>
+                  <em>Randomize answer order</em>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={scrambleAnswers}
+                  onChange={(event) => setScrambleAnswers(event.target.checked)}
+                />
+              </label>
+            </aside>
           </div>
-          <label className="toggle-row">
-            <input type="checkbox" checked={shuffle} onChange={(event) => setShuffle(event.target.checked)} />
-            Shuffle questions
-          </label>
         </section>
       ) : (
         <section className="quiz-stage">
@@ -371,4 +476,3 @@ function ResultsView({
     </section>
   );
 }
-

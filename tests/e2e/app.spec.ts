@@ -7,6 +7,12 @@ test("loads the local study app", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Import question set" })).toBeVisible();
   await page.getByRole("button", { name: /Practice/ }).click();
   await expect(page.getByRole("heading", { name: "Build a practice session" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "All questions" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Scramble answers")).toBeChecked();
+  await expect(page.getByLabel("Limit")).toHaveCount(0);
+  await page.getByRole("button", { name: "Custom limit" }).click();
+  await expect(page.getByLabel("Limit")).toHaveValue("20");
+  await expect(page.getByRole("button", { name: "20" })).toHaveClass(/active/);
   await page.getByRole("button", { name: /Flashcards/ }).click();
   await expect(page.getByRole("heading", { name: "Review with flashcards" })).toBeVisible();
   await page.getByRole("button", { name: /^Quiz$/ }).click();
