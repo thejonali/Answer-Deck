@@ -27,9 +27,7 @@ export const questionInputSchema = z
       });
     }
 
-    const normalizedChoices = new Set(
-      question.choices.map((choice) => choice.text.trim().toLowerCase())
-    );
+    const normalizedChoices = new Set(question.choices.map((choice) => choice.text.trim()));
     if (normalizedChoices.size !== question.choices.length) {
       ctx.addIssue({
         code: "custom",
@@ -71,4 +69,3 @@ export const quizSessionInputSchema = z.object({
     })
   )
 });
-

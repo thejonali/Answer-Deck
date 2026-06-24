@@ -93,7 +93,11 @@ export function splitQuestionBlocks(rawInput: string): string[] {
 
 function isQuestionStart(lines: string[], index: number): boolean {
   const current = lines[index].trim();
-  if (index === 0 && /^\d+$/.test(current)) {
+  if (/^\d+$/.test(current)) {
+    const previousIndex = previousNonEmptyLineIndex(lines, index - 1);
+    if (previousIndex !== -1 && /^Question\s+\d+$/i.test(lines[previousIndex].trim())) {
+      return false;
+    }
     const typeIndex = nextNonEmptyLineIndex(lines, index + 1);
     return typeIndex !== -1 && HEADER_TYPE.test(lines[typeIndex].trim());
   }
@@ -114,6 +118,15 @@ function isQuestionStart(lines: string[], index: number): boolean {
 
 function nextNonEmptyLineIndex(lines: string[], startIndex: number): number {
   for (let index = startIndex; index < lines.length; index += 1) {
+    if (lines[index].trim()) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function previousNonEmptyLineIndex(lines: string[], startIndex: number): number {
+  for (let index = startIndex; index >= 0; index -= 1) {
     if (lines[index].trim()) {
       return index;
     }

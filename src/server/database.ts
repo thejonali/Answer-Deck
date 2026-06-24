@@ -105,8 +105,7 @@ export class StudyDatabase {
         source_selected_answer TEXT,
         raw_block TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(class_id, chapter_id, normalized_prompt)
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
 
       CREATE TABLE IF NOT EXISTS choices (
@@ -171,6 +170,86 @@ export class StudyDatabase {
         answered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    this.migrateQuestionDuplicatePolicy();
+  }
+
+  private migrateQuestionDuplicatePolicy() {
+    if (this.hasPromptOnlyQuestionUniqueConstraint()) {
+      this.rebuildQuestionsTableWithoutPromptUniqueConstraint();
+    }
+
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS questions_unique_source_number
+      ON questions(class_id, chapter_id, source_question_number)
+      WHERE source_question_number IS NOT NULL;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS questions_unique_unnumbered_prompt
+      ON questions(class_id, chapter_id, normalized_prompt)
+      WHERE source_question_number IS NULL;
+    `);
+  }
+
+  private hasPromptOnlyQuestionUniqueConstraint(): boolean {
+    const indexes = this.db.prepare("PRAGMA index_list('questions')").all() as Array<{
+      name: string;
+      unique: number;
+      origin: string;
+    }>;
+
+    return indexes.some((index) => {
+      if (!index.unique || index.origin !== "u") {
+        return false;
+      }
+      const columns = this.db.prepare(`PRAGMA index_info('${index.name}')`).all() as Array<{
+        name: string;
+      }>;
+      return columns.map((column) => column.name).join(",") === "class_id,chapter_id,normalized_prompt";
+    });
+  }
+
+  private rebuildQuestionsTableWithoutPromptUniqueConstraint() {
+    this.db.exec("PRAGMA foreign_keys = OFF;");
+    try {
+      this.db.exec(`
+        BEGIN;
+
+        CREATE TABLE questions_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+          chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+          type TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          normalized_prompt TEXT NOT NULL,
+          source_file_name TEXT,
+          source_question_number INTEGER,
+          source_status TEXT NOT NULL,
+          source_selected_answer TEXT,
+          raw_block TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        INSERT INTO questions_new (
+          id, class_id, chapter_id, type, prompt, normalized_prompt, source_file_name,
+          source_question_number, source_status, source_selected_answer, raw_block, created_at, updated_at
+        )
+        SELECT
+          id, class_id, chapter_id, type, prompt, normalized_prompt, source_file_name,
+          source_question_number, source_status, source_selected_answer, raw_block, created_at, updated_at
+        FROM questions;
+
+        DROP TABLE questions;
+        ALTER TABLE questions_new RENAME TO questions;
+
+        COMMIT;
+      `);
+    } catch (error) {
+      this.db.exec("ROLLBACK;");
+      throw error;
+    } finally {
+      this.db.exec("PRAGMA foreign_keys = ON;");
+    }
   }
 
   upsertClass(name: string): number {
@@ -221,13 +300,20 @@ export class StudyDatabase {
         INSERT INTO choices (question_id, label, text, sort_order, is_correct)
         VALUES (?, ?, ?, ?, ?)
       `);
-      const duplicateLookup = this.db.prepare(
-        "SELECT id FROM questions WHERE class_id = ? AND chapter_id = ? AND normalized_prompt = ?"
+      const duplicateBySourceNumber = this.db.prepare(
+        "SELECT id FROM questions WHERE class_id = ? AND chapter_id = ? AND source_question_number = ?"
+      );
+      const duplicateByPrompt = this.db.prepare(
+        `SELECT id FROM questions
+        WHERE class_id = ? AND chapter_id = ? AND normalized_prompt = ? AND source_question_number IS NULL`
       );
 
       for (const question of params.questions) {
         const normalized = normalizePrompt(question.prompt);
-        const duplicate = duplicateLookup.get(classId, chapterId, normalized);
+        const duplicate =
+          question.sourceQuestionNumber === null
+            ? duplicateByPrompt.get(classId, chapterId, normalized)
+            : duplicateBySourceNumber.get(classId, chapterId, question.sourceQuestionNumber);
         if (duplicate) {
           duplicateCount += 1;
           continue;

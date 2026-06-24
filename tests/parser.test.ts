@@ -58,6 +58,118 @@ describe("deterministic homework parser", () => {
     );
   });
 
+  it("allows answer choices that differ only by letter case", () => {
+    const preview = parseQuizText({
+      className: "Hadoop",
+      chapterName: "Chapter 5",
+      sourceFileName: "chapter5.txt",
+      rawInput: `6
+Multiple Choice
+CORRECT
+1/1
+Grade: 1 out of 1 point possible
+
+The WritableComparable interface adds additional methods used to determine sort order between key objects; these methods are the ___________ methods.
+
+    Option A
+
+    CompareTo, Equals, and HashCode
+
+    Option B
+
+    compareTo, equalsTo, and hashcode
+
+    Option C
+
+    Correct:
+
+    compareTo, equals, and hashCode
+    Correct answer
+
+    Option D
+
+    comparableTo, equals, and hashCode
+
+    Option E
+
+    None of the above`
+    });
+
+    expect(preview.ready).toHaveLength(1);
+    expect(preview.needsCorrection).toHaveLength(0);
+    expect(preview.ready[0].choices.find((choice) => choice.isCorrect)?.label).toBe("C");
+    expect(preview.ready[0].choices.find((choice) => choice.label === "A")?.text).toBe(
+      "CompareTo, Equals, and HashCode"
+    );
+  });
+
+  it("splits later questions that use bare numeric Canvas headers", () => {
+    const preview = parseQuizText({
+      className: "Hadoop",
+      chapterName: "Chapter 5",
+      sourceFileName: "chapter5.txt",
+      rawInput: `17
+Multiple Choice
+CORRECT
+1/1
+Grade: 1 out of 1 point possible
+
+What receives mapper output before reduce?
+
+    Option A
+
+    The input split
+
+    Option B
+
+    Correct:
+
+    The shuffle and sort phase
+    Correct answer
+
+18
+Multiple Choice
+CORRECT
+1/1
+Grade: 1 out of 1 point possible
+
+Which of these statements is correct.
+
+    Option A
+
+    The map input key and value types (K1 and V1) are different from the map output types (K2 and V2).
+
+    Option B
+
+    The map input key and value types (K1 and V1) are different from the map output types
+
+    Option C
+
+    The partition function operates on the intermediate key
+
+    Option D
+
+    A and B are correct
+
+    Option E
+
+    Correct:
+
+    All of them are correct
+    Correct answer`
+    });
+
+    expect(preview.totalBlocks).toBe(2);
+    expect(preview.ready).toHaveLength(2);
+    expect(preview.needsCorrection).toHaveLength(0);
+
+    const question18 = preview.ready.find((question) => question.sourceQuestionNumber === 18);
+    expect(question18?.prompt).toBe("Which of these statements is correct.");
+    expect(question18?.choices.find((choice) => choice.isCorrect)?.text).toBe(
+      "All of them are correct"
+    );
+  });
+
   it("routes malformed blocks to correction instead of guessing", () => {
     const preview = parseQuizText({
       className: "Study Methods",
