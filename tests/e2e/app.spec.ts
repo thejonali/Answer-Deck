@@ -9,6 +9,7 @@ test("loads the local study app", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Build a practice session" })).toBeVisible();
   await expect(page.getByRole("button", { name: "All questions" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByLabel("Scramble answers")).toBeChecked();
+  await expect(page.getByLabel("Review at end")).not.toBeChecked();
   await expect(page.getByLabel("Limit")).toHaveCount(0);
   await page.getByRole("button", { name: "Custom limit" }).click();
   await expect(page.getByLabel("Limit")).toHaveValue("20");

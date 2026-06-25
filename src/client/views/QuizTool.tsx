@@ -22,6 +22,7 @@ export function QuizTool({
   const [questionLimit, setQuestionLimit] = useState(20);
   const [shuffle, setShuffle] = useState(true);
   const [scrambleAnswers, setScrambleAnswers] = useState(true);
+  const [reviewAtEnd, setReviewAtEnd] = useState(false);
   const [quizQuestions, setQuizQuestions] = useState<StoredQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<QuizAnswerInput[]>([]);
@@ -112,7 +113,21 @@ export function QuizTool({
       timeMs: Math.round(performance.now() - questionStartedAt)
     };
     setSelectedChoiceId(choiceId);
-    setAnswers((current) => [...current, answer]);
+    const nextAnswers = [...answers, answer];
+    setAnswers(nextAnswers);
+
+    if (!reviewAtEnd) {
+      return;
+    }
+
+    if (currentIndex + 1 >= quizQuestions.length) {
+      void finishQuiz(nextAnswers);
+      return;
+    }
+
+    setCurrentIndex((value) => value + 1);
+    setSelectedChoiceId(null);
+    setQuestionStartedAt(performance.now());
   }
 
   function nextQuestion() {
@@ -313,6 +328,17 @@ export function QuizTool({
                   onChange={(event) => setScrambleAnswers(event.target.checked)}
                 />
               </label>
+              <label className="summary-toggle">
+                <span>
+                  <strong>Review at end</strong>
+                  <em>Advance immediately and hide feedback until results</em>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={reviewAtEnd}
+                  onChange={(event) => setReviewAtEnd(event.target.checked)}
+                />
+              </label>
             </aside>
           </div>
         </section>
@@ -352,7 +378,7 @@ export function QuizTool({
                 );
               })}
             </div>
-            {currentAnswer && (
+            {currentAnswer && !reviewAtEnd && (
               <div className={`feedback ${currentAnswer.isCorrect ? "ok" : "bad"}`}>
                 {currentAnswer.isCorrect ? <Check size={18} /> : <X size={18} />}
                 {currentAnswer.isCorrect ? "Correct" : "Incorrect"}
