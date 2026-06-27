@@ -1079,6 +1079,11 @@ progress {
   margin-top: 14px;
 }
 
+.history-actions {
+  display: flex;
+  margin-top: 14px;
+}
+
 .history-missed-list {
   display: grid;
   gap: 10px;

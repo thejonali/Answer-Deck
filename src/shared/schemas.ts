@@ -57,6 +57,7 @@ export const quizSessionInputSchema = z.object({
   classId: z.number().int().positive(),
   chapterIds: z.array(z.number().int().positive()).min(1),
   mode: z.enum(["single_chapter", "combined_chapters"]),
+  parentSessionId: z.number().int().positive().nullable().default(null),
   startedAt: z.string().datetime(),
   completedAt: z.string().datetime(),
   answers: z.array(

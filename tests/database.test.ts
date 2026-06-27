@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { StudyDatabase } from "../src/server/database";
 import type { QuestionInput } from "../src/shared/types";
@@ -23,6 +24,46 @@ function question(sourceQuestionNumber: number, correctText: string): QuestionIn
 }
 
 describe("study database imports", () => {
+  it("adds retry lineage columns to an existing quiz session table", () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), "answerdeck-db-")), "study.sqlite");
+    const legacyDatabase = new DatabaseSync(dbPath);
+    legacyDatabase.exec(`
+      CREATE TABLE classes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE quiz_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT NOT NULL,
+        total_questions INTEGER NOT NULL,
+        correct_count INTEGER NOT NULL,
+        incorrect_count INTEGER NOT NULL,
+        average_seconds_per_question REAL NOT NULL
+      );
+    `);
+    legacyDatabase.close();
+
+    const database = new StudyDatabase(dbPath);
+    database.close();
+
+    const migratedDatabase = new DatabaseSync(dbPath);
+    try {
+      const columns = migratedDatabase.prepare("PRAGMA table_info('quiz_sessions')").all() as Array<{
+        name: string;
+      }>;
+      expect(columns.map((column) => column.name)).toEqual(
+        expect.arrayContaining(["parent_session_id", "root_session_id"])
+      );
+    } finally {
+      migratedDatabase.close();
+    }
+  });
+
   it("allows repeated prompts when source question numbers differ", () => {
     const dbPath = join(mkdtempSync(join(tmpdir(), "answerdeck-db-")), "study.sqlite");
     const database = new StudyDatabase(dbPath);
@@ -65,6 +106,100 @@ describe("study database imports", () => {
         2,
         18
       ]);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("tracks missed-question retries by immediate parent and root attempt", () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), "answerdeck-db-")), "study.sqlite");
+    const database = new StudyDatabase(dbPath);
+
+    try {
+      const savedImport = database.saveImport({
+        className: "Hadoop",
+        chapterName: "Chapter 5",
+        sourceFileName: "chapter5.txt",
+        rawInput: "quiz lineage",
+        questions: [question(2, "They are all correct"), question(18, "All of them are correct")],
+        skippedRawBlocks: []
+      });
+      const questions = database.getQuestions(savedImport.classId, [savedImport.chapterId]);
+      const [missedQuestion, correctQuestion] = questions;
+      const missedCorrectChoice = missedQuestion.choices.find((choice) => choice.isCorrect)!;
+      const missedWrongChoice = missedQuestion.choices.find((choice) => !choice.isCorrect)!;
+      const correctChoice = correctQuestion.choices.find((choice) => choice.isCorrect)!;
+      const root = database.saveQuizSession({
+        classId: savedImport.classId,
+        chapterIds: [savedImport.chapterId],
+        mode: "single_chapter",
+        parentSessionId: null,
+        startedAt: "2026-06-27T12:00:00.000Z",
+        completedAt: "2026-06-27T12:01:00.000Z",
+        answers: [
+          {
+            questionId: missedQuestion.id,
+            selectedChoiceId: missedWrongChoice.id,
+            correctChoiceId: missedCorrectChoice.id,
+            isCorrect: false,
+            timeMs: 1000
+          },
+          {
+            questionId: correctQuestion.id,
+            selectedChoiceId: correctChoice.id,
+            correctChoiceId: correctChoice.id,
+            isCorrect: true,
+            timeMs: 800
+          }
+        ]
+      });
+
+      const retryQuiz = database.getMissedQuestionQuiz(root.sessionId);
+      expect(retryQuiz?.questions.map((item) => item.id)).toEqual([missedQuestion.id]);
+      expect(retryQuiz?.rootSessionId).toBe(root.sessionId);
+
+      const child = database.saveQuizSession({
+        classId: savedImport.classId,
+        chapterIds: [savedImport.chapterId],
+        mode: "single_chapter",
+        parentSessionId: root.sessionId,
+        startedAt: "2026-06-27T12:02:00.000Z",
+        completedAt: "2026-06-27T12:02:30.000Z",
+        answers: [
+          {
+            questionId: missedQuestion.id,
+            selectedChoiceId: missedWrongChoice.id,
+            correctChoiceId: missedCorrectChoice.id,
+            isCorrect: false,
+            timeMs: 700
+          }
+        ]
+      });
+      const grandchild = database.saveQuizSession({
+        classId: savedImport.classId,
+        chapterIds: [savedImport.chapterId],
+        mode: "single_chapter",
+        parentSessionId: child.sessionId,
+        startedAt: "2026-06-27T12:03:00.000Z",
+        completedAt: "2026-06-27T12:03:15.000Z",
+        answers: [
+          {
+            questionId: missedQuestion.id,
+            selectedChoiceId: missedCorrectChoice.id,
+            correctChoiceId: missedCorrectChoice.id,
+            isCorrect: true,
+            timeMs: 600
+          }
+        ]
+      });
+
+      const history = database.listQuizHistory();
+      const childHistory = history.find((item) => item.id === child.sessionId)!;
+      const grandchildHistory = history.find((item) => item.id === grandchild.sessionId)!;
+      expect(childHistory.parentSessionId).toBe(root.sessionId);
+      expect(childHistory.rootSessionId).toBe(root.sessionId);
+      expect(grandchildHistory.parentSessionId).toBe(child.sessionId);
+      expect(grandchildHistory.rootSessionId).toBe(root.sessionId);
     } finally {
       database.close();
     }

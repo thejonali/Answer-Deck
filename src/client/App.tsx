@@ -12,6 +12,7 @@ type Tab = "import" | "quiz" | "flashcards" | "history" | "library";
 export function App() {
   const [tab, setTab] = useState<Tab>("import");
   const [classesVersion, setClassesVersion] = useState(0);
+  const [retryRequest, setRetryRequest] = useState<{ sessionId: number; requestId: number } | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const isPracticeActive = tab === "quiz" || tab === "flashcards";
 
@@ -73,10 +74,20 @@ export function App() {
             <QuizTool
               classesVersion={classesVersion}
               onSessionSaved={() => setClassesVersion((value) => value + 1)}
+              retryRequest={retryRequest}
+              onRetryHandled={() => setRetryRequest(null)}
             />
           )}
           {tab === "flashcards" && <FlashcardTool classesVersion={classesVersion} />}
-          {tab === "history" && <HistoryView classesVersion={classesVersion} />}
+          {tab === "history" && (
+            <HistoryView
+              classesVersion={classesVersion}
+              onRetryMissed={(sessionId) => {
+                setRetryRequest((current) => ({ sessionId, requestId: (current?.requestId ?? 0) + 1 }));
+                setTab("quiz");
+              }}
+            />
+          )}
           {tab === "library" && <LibraryView classesVersion={classesVersion} />}
         </Suspense>
       </main>

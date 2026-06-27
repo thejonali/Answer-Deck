@@ -142,8 +142,29 @@ app.post("/api/quiz-sessions", (request, response) => {
   response.json(database.saveQuizSession(parsed.data));
 });
 
+app.get("/api/quiz-sessions/:id/missed-questions", (request, response) => {
+  const id = Number(request.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    response.status(400).json({ error: "A valid quiz session id is required." });
+    return;
+  }
+
+  const quiz = database.getMissedQuestionQuiz(id);
+  if (!quiz) {
+    response.status(404).json({ error: "Quiz session not found." });
+    return;
+  }
+  response.json(quiz);
+});
+
 app.get("/api/export", (_request, response) => {
   response.json(database.exportData());
+});
+
+app.use("/api", (_request, response) => {
+  response.status(404).json({
+    error: "API route not found. Restart AnswerDeck if it was already running when the app was updated."
+  });
 });
 
 if (isProduction) {

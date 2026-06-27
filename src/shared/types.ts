@@ -84,6 +84,7 @@ export interface QuizSessionInput {
   classId: number;
   chapterIds: number[];
   mode: "single_chapter" | "combined_chapters";
+  parentSessionId: number | null;
   startedAt: string;
   completedAt: string;
   answers: QuizAnswerInput[];
@@ -109,6 +110,8 @@ export interface QuizHistoryMissedQuestion {
 
 export interface QuizHistoryItem {
   id: number;
+  parentSessionId: number | null;
+  rootSessionId: number | null;
   className: string;
   mode: "single_chapter" | "combined_chapters";
   startedAt: string;
@@ -119,4 +122,12 @@ export interface QuizHistoryItem {
   averageSecondsPerQuestion: number;
   chapterNames: string[];
   missedQuestions: QuizHistoryMissedQuestion[];
+}
+
+export interface MissedQuestionQuiz {
+  sourceSessionId: number;
+  rootSessionId: number;
+  classId: number;
+  chapterIds: number[];
+  questions: StoredQuestion[];
 }

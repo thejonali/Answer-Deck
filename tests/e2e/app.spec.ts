@@ -99,6 +99,140 @@ test("uses a subdued end action and discards a quiz ended early", async ({ page 
   expect(sessionWasSaved).toBe(false);
 });
 
+test("retries missed answers from session results and records the source attempt", async ({ page }) => {
+  const sessionBodies: Array<{ parentSessionId: number | null }> = [];
+  const quizQuestion = {
+    id: 100,
+    classId: 1,
+    chapterId: 10,
+    className: "Math",
+    chapterName: "Chapter 1",
+    type: "multiple_choice",
+    prompt: "What is two plus two?",
+    sourceQuestionNumber: 1,
+    sourceStatus: "UNKNOWN",
+    sourceSelectedAnswer: null,
+    choices: [
+      { id: 1000, questionId: 100, label: "A", text: "4", sortOrder: 0, isCorrect: true },
+      { id: 1001, questionId: 100, label: "B", text: "5", sortOrder: 1, isCorrect: false }
+    ]
+  };
+  await page.route("**/api/classes", (route) =>
+    route.fulfill({
+      json: [{ id: 1, name: "Math", chapters: [{ id: 10, classId: 1, name: "Chapter 1", questionCount: 1 }] }]
+    })
+  );
+  await page.route("**/api/questions?*", (route) => route.fulfill({ json: [quizQuestion] }));
+  await page.route("**/api/quiz-sessions/42/missed-questions", (route) =>
+    route.fulfill({
+      json: {
+        sourceSessionId: 42,
+        rootSessionId: 42,
+        classId: 1,
+        chapterIds: [10],
+        questions: [quizQuestion]
+      }
+    })
+  );
+  await page.route("**/api/quiz-sessions", async (route) => {
+    sessionBodies.push(route.request().postDataJSON());
+    await route.fulfill({ json: { sessionId: sessionBodies.length === 1 ? 42 : 43 } });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Practice/ }).click();
+  await page.getByLabel("Class").selectOption("1");
+  await page.getByText("Chapter 1", { exact: true }).click();
+  await page.getByRole("button", { name: "Start quiz" }).click();
+  await page.getByRole("button", { name: /5$/ }).click();
+  await page.getByRole("button", { name: "Finish" }).click();
+
+  await expect(page.getByText("Session results", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retest missed answers (1)" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "New quiz" })).toBeVisible();
+  expect(sessionBodies[0].parentSessionId).toBeNull();
+
+  await page.getByRole("button", { name: "Retest missed answers (1)" }).click();
+  await expect(page.getByText("1 / 1", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /4$/ }).click();
+  await page.getByRole("button", { name: "Finish" }).click();
+  await expect(page.getByText("100% accuracy", { exact: true })).toBeVisible();
+  expect(sessionBodies[1].parentSessionId).toBe(42);
+});
+
+test("starts a missed-answer quiz from attempt history", async ({ page }) => {
+  const quizQuestion = {
+    id: 100,
+    classId: 1,
+    chapterId: 10,
+    className: "Math",
+    chapterName: "Chapter 1",
+    type: "multiple_choice",
+    prompt: "What is two plus two?",
+    sourceQuestionNumber: 1,
+    sourceStatus: "UNKNOWN",
+    sourceSelectedAnswer: null,
+    choices: [
+      { id: 1000, questionId: 100, label: "A", text: "4", sortOrder: 0, isCorrect: true },
+      { id: 1001, questionId: 100, label: "B", text: "5", sortOrder: 1, isCorrect: false }
+    ]
+  };
+  await page.route("**/api/history", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 42,
+          parentSessionId: null,
+          rootSessionId: null,
+          className: "Math",
+          mode: "single_chapter",
+          startedAt: "2026-06-27T12:00:00.000Z",
+          completedAt: "2026-06-27T12:01:00.000Z",
+          totalQuestions: 1,
+          correctCount: 0,
+          incorrectCount: 1,
+          averageSecondsPerQuestion: 2,
+          chapterNames: ["Chapter 1"],
+          missedQuestions: [
+            {
+              questionId: 100,
+              chapterName: "Chapter 1",
+              prompt: quizQuestion.prompt,
+              selectedAnswer: "5",
+              correctAnswer: "4",
+              timeMs: 2000
+            }
+          ]
+        }
+      ]
+    })
+  );
+  await page.route("**/api/classes", (route) =>
+    route.fulfill({
+      json: [{ id: 1, name: "Math", chapters: [{ id: 10, classId: 1, name: "Chapter 1", questionCount: 1 }] }]
+    })
+  );
+  await page.route("**/api/quiz-sessions/42/missed-questions", (route) =>
+    route.fulfill({
+      json: {
+        sourceSessionId: 42,
+        rootSessionId: 42,
+        classId: 1,
+        chapterIds: [10],
+        questions: [quizQuestion]
+      }
+    })
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Attempts/ }).click();
+  const retryMissedButton = page.getByRole("button", { name: "Retest missed answers (1)" });
+  await retryMissedButton.waitFor();
+  await retryMissedButton.click();
+  await expect(page.getByText("1 / 1", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: quizQuestion.prompt })).toBeVisible();
+});
+
 test("import review metrics stay inside the review panel", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "New" }).first().click();

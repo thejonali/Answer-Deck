@@ -5,7 +5,13 @@ import { formatDateTime } from "../utils/formatDateTime";
 import { formatDuration } from "../../shared/stats";
 import type { QuizHistoryItem } from "../../shared/types";
 
-export function HistoryView({ classesVersion }: { classesVersion: number }) {
+export function HistoryView({
+  classesVersion,
+  onRetryMissed
+}: {
+  classesVersion: number;
+  onRetryMissed: (sessionId: number) => void;
+}) {
   const [history, setHistory] = useState<QuizHistoryItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,7 +64,15 @@ export function HistoryView({ classesVersion }: { classesVersion: number }) {
                 <span>{attempt.chapterNames.join(", ") || "No chapters recorded"}</span>
                 <span>{attempt.mode === "single_chapter" ? "Single chapter" : "Combined chapters"}</span>
                 <span>{attempt.averageSecondsPerQuestion.toFixed(1)}s avg</span>
+                {attempt.parentSessionId !== null && <span>Missed-answer retry</span>}
               </div>
+              {attempt.missedQuestions.length > 0 && (
+                <div className="history-actions">
+                  <button className="ghost-action" onClick={() => onRetryMissed(attempt.id)}>
+                    Retest missed answers ({attempt.missedQuestions.length})
+                  </button>
+                </div>
+              )}
               {attempt.missedQuestions.length > 0 ? (
                 <details className="history-details">
                   <summary>{attempt.missedQuestions.length} missed question(s)</summary>
@@ -88,4 +102,3 @@ export function HistoryView({ classesVersion }: { classesVersion: number }) {
     </section>
   );
 }
-

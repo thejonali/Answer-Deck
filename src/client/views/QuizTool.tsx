@@ -1,7 +1,7 @@
 import { BarChart3, Check, ChevronRight, Play, RotateCcw, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { getQuestions, listClasses, saveQuizSession } from "../api";
+import { getMissedQuestionQuiz, getQuestions, listClasses, saveQuizSession } from "../api";
 import { Metric } from "../components/Metric";
 import { calculateQuizResult, formatDuration, shuffleArray } from "../../shared/stats";
 import type { QuizAnswerInput, StoredChapter, StoredClass, StoredQuestion } from "../../shared/types";
@@ -10,10 +10,14 @@ const quickQuestionLimits = [10, 20, 30, 50];
 
 export function QuizTool({
   classesVersion,
-  onSessionSaved
+  onSessionSaved,
+  retryRequest,
+  onRetryHandled
 }: {
   classesVersion: number;
   onSessionSaved: () => void;
+  retryRequest: { sessionId: number; requestId: number } | null;
+  onRetryHandled: () => void;
 }) {
   const [classes, setClasses] = useState<StoredClass[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<number | null>(null);
@@ -30,11 +34,22 @@ export function QuizTool({
   const [questionStartedAt, setQuestionStartedAt] = useState(performance.now());
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
+  const [parentSessionId, setParentSessionId] = useState<number | null>(null);
+  const [savedSessionId, setSavedSessionId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const handledRetryRequest = useRef<number | null>(null);
 
   useEffect(() => {
     listClasses().then(setClasses).catch((caught) => setError(String(caught)));
   }, [classesVersion]);
+
+  useEffect(() => {
+    if (!retryRequest || handledRetryRequest.current === retryRequest.requestId) {
+      return;
+    }
+    handledRetryRequest.current = retryRequest.requestId;
+    void startMissedQuiz(retryRequest.sessionId).finally(onRetryHandled);
+  }, [retryRequest]);
 
   const selectedClass = classes.find((item) => item.id === selectedClassId) ?? null;
   const selectedChapters = selectedClass?.chapters.filter((chapter) => selectedChapterIds.includes(chapter.id)) ?? [];
@@ -72,6 +87,8 @@ export function QuizTool({
       setSelectedChoiceId(null);
       setStartedAt(new Date().toISOString());
       setCompleted(false);
+      setParentSessionId(null);
+      setSavedSessionId(null);
       setQuestionStartedAt(performance.now());
       setError(null);
     } catch (caught) {
@@ -85,6 +102,39 @@ export function QuizTool({
     setAnswers([]);
     setSelectedChoiceId(null);
     setStartedAt(null);
+    setParentSessionId(null);
+    setSavedSessionId(null);
+  }
+
+  async function startMissedQuiz(sessionId: number) {
+    try {
+      const retry = await getMissedQuestionQuiz(sessionId);
+      if (retry.questions.length === 0) {
+        setError("That attempt has no missed questions to retry.");
+        return;
+      }
+      const answerSeed = Date.now();
+      const prepared = scrambleAnswers
+        ? retry.questions.map((question, index) => ({
+            ...question,
+            choices: shuffleArray(question.choices, answerSeed + question.id + index)
+          }))
+        : retry.questions;
+      setSelectedClassId(retry.classId);
+      setSelectedChapterIds(retry.chapterIds);
+      setQuizQuestions(prepared);
+      setCurrentIndex(0);
+      setAnswers([]);
+      setSelectedChoiceId(null);
+      setStartedAt(new Date().toISOString());
+      setCompleted(false);
+      setParentSessionId(retry.sourceSessionId);
+      setSavedSessionId(null);
+      setQuestionStartedAt(performance.now());
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to load missed questions.");
+    }
   }
 
   async function finishQuiz(finalAnswers: QuizAnswerInput[]) {
@@ -92,16 +142,22 @@ export function QuizTool({
       return;
     }
     setCompleted(true);
-    await saveQuizSession({
-      classId: selectedClassId,
-      chapterIds: selectedChapterIds,
-      mode: selectedChapterIds.length === 1 ? "single_chapter" : "combined_chapters",
-      startedAt,
-      completedAt: new Date().toISOString(),
-      answers: finalAnswers
-    })
-      .then(onSessionSaved)
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to save quiz."));
+    setSavedSessionId(null);
+    try {
+      const saved = await saveQuizSession({
+        classId: selectedClassId,
+        chapterIds: selectedChapterIds,
+        mode: selectedChapterIds.length === 1 ? "single_chapter" : "combined_chapters",
+        parentSessionId,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        answers: finalAnswers
+      });
+      setSavedSessionId(saved.sessionId);
+      onSessionSaved();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to save quiz.");
+    }
   }
 
   function answerQuestion(choiceId: number) {
@@ -171,10 +227,14 @@ export function QuizTool({
         answers={answers}
         questions={quizQuestions}
         chapters={selectedChapters}
+        sessionId={savedSessionId}
+        onRetryMissed={startMissedQuiz}
         onRestart={() => {
           setCompleted(false);
           setQuizQuestions([]);
           setAnswers([]);
+          setParentSessionId(null);
+          setSavedSessionId(null);
         }}
       />
     );
@@ -406,11 +466,15 @@ function ResultsView({
   answers,
   questions,
   chapters,
+  sessionId,
+  onRetryMissed,
   onRestart
 }: {
   answers: QuizAnswerInput[];
   questions: StoredQuestion[];
   chapters: StoredChapter[];
+  sessionId: number | null;
+  onRetryMissed: (sessionId: number) => void;
   onRestart: () => void;
 }) {
   const result = calculateQuizResult(answers);
@@ -448,9 +512,20 @@ function ResultsView({
           <p className="eyebrow">Session results</p>
           <h2>{result.percentage}% accuracy</h2>
         </div>
-        <button className="primary-action" onClick={onRestart}>
-          <RotateCcw size={18} /> New quiz
-        </button>
+        <div className="inline-actions">
+          {missed.length > 0 && (
+            <button
+              className="primary-action"
+              onClick={() => sessionId !== null && void onRetryMissed(sessionId)}
+              disabled={sessionId === null}
+            >
+              <RotateCcw size={18} /> {sessionId === null ? "Saving attempt..." : `Retest missed answers (${missed.length})`}
+            </button>
+          )}
+          <button className="ghost-action" onClick={onRestart}>
+            <Play size={18} /> New quiz
+          </button>
+        </div>
       </header>
       <div className="summary-row">
         <Metric label="Correct" value={result.correctCount} />

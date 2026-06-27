@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   ChoiceInput,
+  MissedQuestionQuiz,
   QuestionInput,
   QuizSessionInput,
   QuizHistoryItem,
@@ -48,6 +49,8 @@ interface ChoiceRow {
 
 interface QuizHistoryRow {
   id: number;
+  parentSessionId: number | null;
+  rootSessionId: number | null;
   className: string;
   mode: "single_chapter" | "combined_chapters";
   startedAt: string;
@@ -144,6 +147,8 @@ export class StudyDatabase {
       CREATE TABLE IF NOT EXISTS quiz_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+        parent_session_id INTEGER REFERENCES quiz_sessions(id) ON DELETE SET NULL,
+        root_session_id INTEGER REFERENCES quiz_sessions(id) ON DELETE SET NULL,
         mode TEXT NOT NULL,
         started_at TEXT NOT NULL,
         completed_at TEXT NOT NULL,
@@ -172,6 +177,31 @@ export class StudyDatabase {
     `);
 
     this.migrateQuestionDuplicatePolicy();
+    this.migrateQuizSessionLineage();
+  }
+
+  private migrateQuizSessionLineage() {
+    const columns = this.db.prepare("PRAGMA table_info('quiz_sessions')").all() as Array<{ name: string }>;
+    const columnNames = new Set(columns.map((column) => column.name));
+
+    if (!columnNames.has("parent_session_id")) {
+      this.db.exec(
+        "ALTER TABLE quiz_sessions ADD COLUMN parent_session_id INTEGER REFERENCES quiz_sessions(id) ON DELETE SET NULL"
+      );
+    }
+    if (!columnNames.has("root_session_id")) {
+      this.db.exec(
+        "ALTER TABLE quiz_sessions ADD COLUMN root_session_id INTEGER REFERENCES quiz_sessions(id) ON DELETE SET NULL"
+      );
+    }
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS quiz_sessions_parent_session_id
+      ON quiz_sessions(parent_session_id);
+
+      CREATE INDEX IF NOT EXISTS quiz_sessions_root_session_id
+      ON quiz_sessions(root_session_id);
+    `);
   }
 
   private migrateQuestionDuplicatePolicy() {
@@ -485,16 +515,50 @@ export class StudyDatabase {
   saveQuizSession(input: QuizSessionInput): { sessionId: number } {
     this.db.exec("BEGIN");
     try {
+      let rootSessionId: number | null = null;
+      if (input.parentSessionId !== null) {
+        const parent = this.db
+          .prepare(
+            `SELECT id, class_id as classId, COALESCE(root_session_id, id) as rootSessionId
+            FROM quiz_sessions WHERE id = ?`
+          )
+          .get(input.parentSessionId) as
+          | { id: number; classId: number; rootSessionId: number }
+          | undefined;
+        if (!parent || parent.classId !== input.classId) {
+          throw new Error("The retry source must be an existing attempt from the same class.");
+        }
+
+        const missedRows = this.db
+          .prepare(
+            "SELECT question_id as questionId FROM quiz_answers WHERE quiz_session_id = ? AND is_correct = 0"
+          )
+          .all(input.parentSessionId) as Array<{ questionId: number }>;
+        const missedIds = new Set(missedRows.map((row) => row.questionId));
+        const answerIds = new Set(input.answers.map((answer) => answer.questionId));
+        if (
+          missedIds.size === 0 ||
+          missedIds.size !== input.answers.length ||
+          answerIds.size !== input.answers.length ||
+          [...answerIds].some((questionId) => !missedIds.has(questionId))
+        ) {
+          throw new Error("A retry must answer exactly the questions missed in its source attempt.");
+        }
+        rootSessionId = parent.rootSessionId;
+      }
+
       const result = calculateQuizResult(input.answers);
       const sessionResult = this.db
         .prepare(
           `INSERT INTO quiz_sessions (
-            class_id, mode, started_at, completed_at, total_questions,
+            class_id, parent_session_id, root_session_id, mode, started_at, completed_at, total_questions,
             correct_count, incorrect_count, average_seconds_per_question
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           input.classId,
+          input.parentSessionId,
+          rootSessionId,
           input.mode,
           input.startedAt,
           input.completedAt,
@@ -539,6 +603,8 @@ export class StudyDatabase {
       .prepare(
         `SELECT
           quiz_sessions.id,
+          quiz_sessions.parent_session_id as parentSessionId,
+          quiz_sessions.root_session_id as rootSessionId,
           classes.name as className,
           quiz_sessions.mode,
           quiz_sessions.started_at as startedAt,
@@ -576,6 +642,8 @@ export class StudyDatabase {
 
     return rows.map((row) => ({
       id: row.id,
+      parentSessionId: row.parentSessionId,
+      rootSessionId: row.rootSessionId,
       className: row.className,
       mode: row.mode,
       startedAt: row.startedAt,
@@ -587,6 +655,78 @@ export class StudyDatabase {
       chapterNames: row.chapterNames ? row.chapterNames.split("||") : [],
       missedQuestions: missedStatement.all(row.id) as unknown as QuizHistoryMissedQuestion[]
     }));
+  }
+
+  getMissedQuestionQuiz(sessionId: number): MissedQuestionQuiz | null {
+    const session = this.db
+      .prepare(
+        `SELECT id, class_id as classId, COALESCE(root_session_id, id) as rootSessionId
+        FROM quiz_sessions WHERE id = ?`
+      )
+      .get(sessionId) as { id: number; classId: number; rootSessionId: number } | undefined;
+    if (!session) {
+      return null;
+    }
+
+    const questionIds = (
+      this.db
+        .prepare(
+          `SELECT question_id as questionId
+          FROM quiz_answers
+          WHERE quiz_session_id = ? AND is_correct = 0
+          ORDER BY id`
+        )
+        .all(sessionId) as Array<{ questionId: number }>
+    ).map((row) => row.questionId);
+    const questions = this.getQuestionsByIds(session.classId, questionIds);
+
+    return {
+      sourceSessionId: sessionId,
+      rootSessionId: session.rootSessionId,
+      classId: session.classId,
+      chapterIds: [...new Set(questions.map((question) => question.chapterId))],
+      questions
+    };
+  }
+
+  private getQuestionsByIds(classId: number, questionIds: number[]): StoredQuestion[] {
+    if (questionIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = questionIds.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT
+          questions.id, questions.class_id as classId, questions.chapter_id as chapterId,
+          classes.name as className, chapters.name as chapterName, questions.type,
+          questions.prompt, questions.source_question_number as sourceQuestionNumber,
+          questions.source_status as sourceStatus, questions.source_selected_answer as sourceSelectedAnswer
+        FROM questions
+        JOIN classes ON classes.id = questions.class_id
+        JOIN chapters ON chapters.id = questions.chapter_id
+        WHERE questions.class_id = ? AND questions.id IN (${placeholders})`
+      )
+      .all(classId, ...questionIds) as unknown as QuestionRow[];
+    const rowsById = new Map(rows.map((row) => [row.id, row]));
+    const choiceStatement = this.db.prepare(`
+      SELECT id, question_id as questionId, label, text, sort_order as sortOrder, is_correct as isCorrect
+      FROM choices WHERE question_id = ? ORDER BY sort_order
+    `);
+
+    return questionIds.flatMap((questionId) => {
+      const row = rowsById.get(questionId);
+      if (!row) {
+        return [];
+      }
+      return [{
+        ...row,
+        choices: (choiceStatement.all(row.id) as unknown as ChoiceRow[]).map((choice) => ({
+          ...choice,
+          isCorrect: Boolean(choice.isCorrect)
+        }))
+      }];
+    });
   }
 
   exportData() {

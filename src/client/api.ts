@@ -1,5 +1,6 @@
 import type {
   ImportPreview,
+  MissedQuestionQuiz,
   QuestionInput,
   QuizHistoryItem,
   QuizSessionInput,
@@ -12,11 +13,23 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...options?.headers },
     ...options
   });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(body.error ?? "Request failed.");
+
+  const responseText = await response.text();
+  let body: unknown;
+  try {
+    body = responseText ? JSON.parse(responseText) : null;
+  } catch {
+    throw new Error("The server returned an unexpected response. Restart AnswerDeck and try again.");
   }
-  return response.json() as Promise<T>;
+
+  if (!response.ok) {
+    const error =
+      typeof body === "object" && body !== null && "error" in body && typeof body.error === "string"
+        ? body.error
+        : response.statusText || "Request failed.";
+    throw new Error(error);
+  }
+  return body as T;
 }
 
 export function previewImport(input: {
@@ -87,6 +100,10 @@ export function saveQuizSession(input: QuizSessionInput) {
     method: "POST",
     body: JSON.stringify(input)
   });
+}
+
+export function getMissedQuestionQuiz(sessionId: number) {
+  return request<MissedQuestionQuiz>(`/api/quiz-sessions/${sessionId}/missed-questions`);
 }
 
 export function updateQuestion(questionId: number, input: QuestionInput) {
