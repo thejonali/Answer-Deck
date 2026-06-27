@@ -79,6 +79,14 @@ export function QuizTool({
     }
   }
 
+  function endQuiz() {
+    setQuizQuestions([]);
+    setCurrentIndex(0);
+    setAnswers([]);
+    setSelectedChoiceId(null);
+    setStartedAt(null);
+  }
+
   async function finishQuiz(finalAnswers: QuizAnswerInput[]) {
     if (!selectedClassId || !startedAt) {
       return;
@@ -179,11 +187,6 @@ export function QuizTool({
           <p className="eyebrow">Practice session</p>
           <h2>Build a practice session</h2>
         </div>
-        {quizQuestions.length === 0 && (
-          <button className="primary-action" onClick={startQuiz}>
-            <Play size={18} /> Start
-          </button>
-        )}
       </header>
 
       {error && <div className="notice error">{error}</div>}
@@ -339,16 +342,20 @@ export function QuizTool({
                   onChange={(event) => setReviewAtEnd(event.target.checked)}
                 />
               </label>
+              <button className="primary-action setup-start-action" onClick={startQuiz}>
+                <Play size={18} /> Start quiz
+              </button>
             </aside>
           </div>
         </section>
       ) : (
         <section className="quiz-stage">
-          <div className="quiz-progress">
-            <span>
-              {currentIndex + 1} / {quizQuestions.length}
-            </span>
-            <progress value={currentIndex + 1} max={quizQuestions.length} />
+          <div className="quiz-toolbar">
+            <div className="quiz-progress">
+              <span>{currentIndex + 1} / {quizQuestions.length}</span>
+              <progress aria-label="Quiz progress" value={currentIndex + 1} max={quizQuestions.length} />
+            </div>
+            <button className="quiz-end-action" onClick={endQuiz}>End quiz</button>
           </div>
           <article className="question-card">
             <p className="chapter-label">{currentQuestion.chapterName}</p>
