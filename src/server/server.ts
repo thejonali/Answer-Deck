@@ -8,6 +8,7 @@ import { parseQuizText } from "../shared/parser";
 import {
   importPreviewRequestSchema,
   importSaveRequestSchema,
+  performanceReportQuerySchema,
   questionInputSchema,
   quizSessionInputSchema
 } from "../shared/schemas";
@@ -23,19 +24,6 @@ const args = new Map(
 );
 const port = Number(args.get("port") ?? process.env.PORT ?? 4173);
 const isProduction = process.env.NODE_ENV === "production";
-const optionalPositiveInteger = z.preprocess(
-  (value) => (value === undefined || value === "" ? undefined : value),
-  z.coerce.number().int().positive().optional()
-);
-const performanceReportQuerySchema = z.object({
-  classId: optionalPositiveInteger,
-  chapterId: optionalPositiveInteger,
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  attemptType: z.enum(["all", "original", "retry"]).default("all"),
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(25)
-});
 
 const app = express();
 const database = new StudyDatabase(process.env.STUDY_DB_PATH ?? "data/study.sqlite");

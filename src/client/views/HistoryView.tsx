@@ -123,10 +123,12 @@ function AttemptGroup({
 
 export function HistoryView({
   classesVersion,
-  onRetryMissed
+  onRetryMissed,
+  onViewReports
 }: {
   classesVersion: number;
   onRetryMissed: (sessionId: number) => void;
+  onViewReports: () => void;
 }) {
   const [history, setHistory] = useState<QuizHistoryGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +146,9 @@ export function HistoryView({
           <h2>Recent Attempts</h2>
           <p className="page-description">Your latest quiz attempts, with missed-answer retests grouped together.</p>
         </div>
+        <button className="ghost-action" onClick={onViewReports}>
+          View performance reports
+        </button>
       </header>
       {error && <div className="notice error">{error}</div>}
       <div className="history-list compact-history-list">

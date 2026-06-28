@@ -2,6 +2,78 @@ import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+const performanceReportFixture = {
+  kpis: {
+    attempts: 2,
+    questionsAnswered: 12,
+    weightedAccuracy: 75,
+    firstPassAccuracy: 70,
+    latestMastery: 80,
+    averageSecondsPerQuestion: 6.5,
+    retryRecovery: 100,
+    unresolvedQuestions: 1
+  },
+  trend: [
+    {
+      sessionId: 1,
+      completedAt: "2026-06-27T12:00:00.000Z",
+      attemptType: "original",
+      accuracy: 70,
+      questionsAnswered: 10
+    },
+    {
+      sessionId: 2,
+      completedAt: "2026-06-27T12:05:00.000Z",
+      attemptType: "retry",
+      accuracy: 100,
+      questionsAnswered: 2
+    }
+  ],
+  activity: [{ date: "2026-06-27", correct: 9, incorrect: 3 }],
+  chapters: [
+    {
+      chapterId: 10,
+      className: "Math",
+      chapterName: "Chapter 1",
+      questionsAnswered: 12,
+      accuracy: 75,
+      latestMastery: 80,
+      unresolvedQuestions: 1
+    }
+  ],
+  retryFunnel: { missed: 3, retested: 2, recovered: 2, stillMissed: 0 },
+  weakQuestions: [
+    {
+      questionId: 100,
+      className: "Math",
+      chapterName: "Chapter 1",
+      prompt: "What is two plus two?",
+      answers: 2,
+      misses: 1,
+      latestCorrect: true,
+      averageSeconds: 5
+    }
+  ],
+  attempts: {
+    items: [
+      {
+        id: 1,
+        parentSessionId: null,
+        rootSessionId: null,
+        className: "Math",
+        chapterNames: ["Chapter 1"],
+        completedAt: "2026-06-27T12:00:00.000Z",
+        totalQuestions: 10,
+        correctCount: 7,
+        averageSecondsPerQuestion: 6.5
+      }
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 25
+  }
+};
+
 test("loads the local study app", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Import question set" })).toBeVisible();
@@ -23,8 +95,41 @@ test("loads the local study app", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Start quiz" })).toBeVisible();
   await page.getByRole("button", { name: /Attempts/ }).click();
   await expect(page.getByRole("heading", { name: "Recent Attempts" })).toBeVisible();
+  await page.getByRole("button", { name: /Reports/ }).click();
+  await expect(page.getByRole("heading", { name: "Performance Reports" })).toBeVisible();
   await page.getByRole("button", { name: /Library/ }).click();
   await expect(page.getByRole("heading", { name: "Question Library" })).toBeVisible();
+});
+
+test("filters and renders performance reports without page overflow", async ({ page }) => {
+  await page.route("**/api/classes", (route) =>
+    route.fulfill({
+      json: [{ id: 1, name: "Math", chapters: [{ id: 10, classId: 1, name: "Chapter 1", questionCount: 10 }] }]
+    })
+  );
+  await page.route("**/api/reports/performance?*", (route) => route.fulfill({ json: performanceReportFixture }));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Reports/ }).click();
+  await expect(page.getByText("First-pass accuracy", { exact: true })).toBeVisible();
+  await expect(page.locator(".metric").filter({ hasText: "First-pass accuracy" }).locator("strong")).toHaveText("70%");
+  await expect(page.getByRole("heading", { name: "Accuracy over time" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Weak and repeated questions" })).toBeVisible();
+  await expect(page.getByText("What is two plus two?", { exact: true })).toBeVisible();
+
+  await page.getByLabel("Class").selectOption("1");
+  await expect(page.getByLabel("Chapter")).toBeEnabled();
+  await expect(page.getByLabel("Chapter").getByRole("option", { name: "Chapter 1" })).toHaveCount(1);
+
+  await page.setViewportSize({ width: 390, height: 1000 });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+    .toBe(true);
+  const tableOverflow = await page.locator(".report-table-scroll").first().evaluate((node) => ({
+    clientWidth: node.clientWidth,
+    scrollWidth: node.scrollWidth
+  }));
+  expect(tableOverflow.scrollWidth).toBeGreaterThanOrEqual(tableOverflow.clientWidth);
 });
 
 test("uses a subdued end action and discards a quiz ended early", async ({ page }) => {

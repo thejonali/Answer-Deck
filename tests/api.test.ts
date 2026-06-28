@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMissedQuestionQuiz } from "../src/client/api";
+import { performanceReportQuerySchema } from "../src/shared/schemas";
 
 describe("API responses", () => {
   afterEach(() => {
@@ -17,5 +18,37 @@ describe("API responses", () => {
     await expect(getMissedQuestionQuiz(42)).rejects.toThrow(
       "The server returned an unexpected response. Restart AnswerDeck and try again."
     );
+  });
+});
+
+describe("report query validation", () => {
+  it("accepts omitted filters and applies pagination defaults", () => {
+    expect(performanceReportQuerySchema.parse({})).toEqual({
+      attemptType: "all",
+      page: 1,
+      pageSize: 25
+    });
+  });
+
+  it("coerces explicit report filters from query strings", () => {
+    expect(
+      performanceReportQuerySchema.parse({
+        classId: "1",
+        chapterId: "2",
+        from: "2026-06-01",
+        to: "2026-06-28",
+        attemptType: "retry",
+        page: "2",
+        pageSize: "10"
+      })
+    ).toEqual({
+      classId: 1,
+      chapterId: 2,
+      from: "2026-06-01",
+      to: "2026-06-28",
+      attemptType: "retry",
+      page: 2,
+      pageSize: 10
+    });
   });
 });

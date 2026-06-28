@@ -1,13 +1,14 @@
 import { lazy, Suspense, useState } from "react";
-import { Database, History, Layers, ListChecks, PanelLeftClose, PanelLeftOpen, Play, Upload } from "lucide-react";
+import { BarChart3, Database, History, Layers, ListChecks, PanelLeftClose, PanelLeftOpen, Play, Upload } from "lucide-react";
 
 const ImportTool = lazy(() => import("./views/ImportTool").then((module) => ({ default: module.ImportTool })));
 const QuizTool = lazy(() => import("./views/QuizTool").then((module) => ({ default: module.QuizTool })));
 const FlashcardTool = lazy(() => import("./views/FlashcardTool").then((module) => ({ default: module.FlashcardTool })));
 const HistoryView = lazy(() => import("./views/HistoryView").then((module) => ({ default: module.HistoryView })));
+const ReportsView = lazy(() => import("./views/ReportsView").then((module) => ({ default: module.ReportsView })));
 const LibraryView = lazy(() => import("./views/LibraryView").then((module) => ({ default: module.LibraryView })));
 
-type Tab = "import" | "quiz" | "flashcards" | "history" | "library";
+type Tab = "import" | "quiz" | "flashcards" | "history" | "reports" | "library";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("import");
@@ -54,6 +55,9 @@ export function App() {
           <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>
             <History size={18} /> <span>Attempts</span>
           </button>
+          <button className={tab === "reports" ? "active" : ""} onClick={() => setTab("reports")}>
+            <BarChart3 size={18} /> <span>Reports</span>
+          </button>
           <button className={tab === "library" ? "active" : ""} onClick={() => setTab("library")}>
             <Database size={18} /> <span>Library</span>
           </button>
@@ -86,8 +90,10 @@ export function App() {
                 setRetryRequest((current) => ({ sessionId, requestId: (current?.requestId ?? 0) + 1 }));
                 setTab("quiz");
               }}
+              onViewReports={() => setTab("reports")}
             />
           )}
+          {tab === "reports" && <ReportsView classesVersion={classesVersion} />}
           {tab === "library" && <LibraryView classesVersion={classesVersion} />}
         </Suspense>
       </main>
