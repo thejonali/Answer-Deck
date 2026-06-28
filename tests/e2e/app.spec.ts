@@ -22,7 +22,7 @@ test("loads the local study app", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Build a practice session" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Start quiz" })).toBeVisible();
   await page.getByRole("button", { name: /Attempts/ }).click();
-  await expect(page.getByRole("heading", { name: "Attempt History" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent Attempts" })).toBeVisible();
   await page.getByRole("button", { name: /Library/ }).click();
   await expect(page.getByRole("heading", { name: "Question Library" })).toBeVisible();
 });
@@ -177,30 +177,38 @@ test("starts a missed-answer quiz from attempt history", async ({ page }) => {
       { id: 1001, questionId: 100, label: "B", text: "5", sortOrder: 1, isCorrect: false }
     ]
   };
-  await page.route("**/api/history", (route) =>
+  await page.route("**/api/history/recent", (route) =>
     route.fulfill({
       json: [
         {
-          id: 42,
-          parentSessionId: null,
-          rootSessionId: null,
+          rootSessionId: 42,
           className: "Math",
-          mode: "single_chapter",
-          startedAt: "2026-06-27T12:00:00.000Z",
           completedAt: "2026-06-27T12:01:00.000Z",
-          totalQuestions: 1,
-          correctCount: 0,
-          incorrectCount: 1,
-          averageSecondsPerQuestion: 2,
           chapterNames: ["Chapter 1"],
-          missedQuestions: [
+          attempts: [
             {
-              questionId: 100,
-              chapterName: "Chapter 1",
-              prompt: quizQuestion.prompt,
-              selectedAnswer: "5",
-              correctAnswer: "4",
-              timeMs: 2000
+              id: 42,
+              parentSessionId: null,
+              rootSessionId: null,
+              className: "Math",
+              mode: "single_chapter",
+              startedAt: "2026-06-27T12:00:00.000Z",
+              completedAt: "2026-06-27T12:01:00.000Z",
+              totalQuestions: 1,
+              correctCount: 0,
+              incorrectCount: 1,
+              averageSecondsPerQuestion: 2,
+              chapterNames: ["Chapter 1"],
+              missedQuestions: [
+                {
+                  questionId: 100,
+                  chapterName: "Chapter 1",
+                  prompt: quizQuestion.prompt,
+                  selectedAnswer: "5",
+                  correctAnswer: "4",
+                  timeMs: 2000
+                }
+              ]
             }
           ]
         }

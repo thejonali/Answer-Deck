@@ -200,6 +200,16 @@ describe("study database imports", () => {
       expect(childHistory.rootSessionId).toBe(root.sessionId);
       expect(grandchildHistory.parentSessionId).toBe(child.sessionId);
       expect(grandchildHistory.rootSessionId).toBe(root.sessionId);
+
+      const recentHistory = database.listRecentQuizHistory();
+      expect(recentHistory).toHaveLength(1);
+      expect(recentHistory[0].rootSessionId).toBe(root.sessionId);
+      expect(recentHistory[0].attempts.map((item) => item.id)).toEqual([
+        root.sessionId,
+        child.sessionId,
+        grandchild.sessionId
+      ]);
+      expect(recentHistory[0].attempts.map((item) => item.incorrectCount)).toEqual([1, 1, 0]);
     } finally {
       database.close();
     }

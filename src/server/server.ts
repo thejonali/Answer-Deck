@@ -92,6 +92,10 @@ app.get("/api/history", (_request, response) => {
   response.json(database.listQuizHistory());
 });
 
+app.get("/api/history/recent", (_request, response) => {
+  response.json(database.listRecentQuizHistory());
+});
+
 app.get("/api/questions", (request, response) => {
   const classId = Number(request.query.classId);
   const chapterIds = String(request.query.chapterIds ?? "")

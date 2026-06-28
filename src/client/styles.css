@@ -101,6 +101,11 @@ button:disabled {
   color: #6c7887;
 }
 
+.page-description {
+  margin: 8px 0 0;
+  color: #6c7887;
+}
+
 .brand-copy p {
   font-size: 13px;
   color: #a8b3bf;
@@ -1059,7 +1064,22 @@ progress {
 
 .history-header h3 {
   margin: 0;
-  font-size: 24px;
+  font-size: 20px;
+}
+
+.compact-history-list {
+  gap: 10px;
+}
+
+.compact-history-item {
+  padding: 14px 16px;
+}
+
+.history-score-progression {
+  margin-top: 12px;
+  color: #26313d;
+  font-size: 18px;
+  font-weight: 800;
 }
 
 .history-meta,
@@ -1077,6 +1097,44 @@ progress {
 
 .history-details {
   margin-top: 14px;
+}
+
+.history-details summary {
+  color: #2e6de8;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.history-attempt-chain {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.history-attempt-step {
+  border: 1px solid #e2e7ed;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.history-attempt-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-attempt-summary strong {
+  display: block;
+}
+
+.nested-history-details {
+  padding-top: 2px;
+}
+
+.history-limit-note {
+  margin: -8px 0 0;
+  text-align: center;
 }
 
 .history-actions {

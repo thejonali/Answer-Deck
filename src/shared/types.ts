@@ -124,6 +124,14 @@ export interface QuizHistoryItem {
   missedQuestions: QuizHistoryMissedQuestion[];
 }
 
+export interface QuizHistoryGroup {
+  rootSessionId: number;
+  className: string;
+  chapterNames: string[];
+  completedAt: string;
+  attempts: QuizHistoryItem[];
+}
+
 export interface MissedQuestionQuiz {
   sourceSessionId: number;
   rootSessionId: number;

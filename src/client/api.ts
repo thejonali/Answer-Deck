@@ -2,6 +2,7 @@ import type {
   ImportPreview,
   MissedQuestionQuiz,
   QuestionInput,
+  QuizHistoryGroup,
   QuizHistoryItem,
   QuizSessionInput,
   StoredClass,
@@ -71,6 +72,10 @@ export function listClasses() {
 
 export function listHistory() {
   return request<QuizHistoryItem[]>("/api/history");
+}
+
+export function listRecentHistory() {
+  return request<QuizHistoryGroup[]>("/api/history/recent");
 }
 
 export function renameClass(classId: number, name: string) {

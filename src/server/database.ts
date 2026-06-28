@@ -5,6 +5,7 @@ import type {
   ChoiceInput,
   MissedQuestionQuiz,
   QuestionInput,
+  QuizHistoryGroup,
   QuizSessionInput,
   QuizHistoryItem,
   QuizHistoryMissedQuestion,
@@ -599,7 +600,53 @@ export class StudyDatabase {
   }
 
   listQuizHistory(): QuizHistoryItem[] {
-    const rows = this.db
+    const rows = this.listQuizHistoryRows();
+    return this.hydrateQuizHistory(rows);
+  }
+
+  listRecentQuizHistory(limit = 8): QuizHistoryGroup[] {
+    const safeLimit = Math.min(Math.max(Math.trunc(limit), 1), 20);
+    const rootRows = this.db
+      .prepare(
+        `SELECT id
+        FROM quiz_sessions
+        WHERE parent_session_id IS NULL
+        ORDER BY completed_at DESC, id DESC
+        LIMIT ?`
+      )
+      .all(safeLimit) as Array<{ id: number }>;
+
+    if (rootRows.length === 0) {
+      return [];
+    }
+
+    const rootIds = rootRows.map((row) => row.id);
+    const placeholders = rootIds.map(() => "?").join(", ");
+    const rows = this.listQuizHistoryRows(
+      `WHERE quiz_sessions.id IN (${placeholders}) OR quiz_sessions.root_session_id IN (${placeholders})`,
+      [...rootIds, ...rootIds]
+    );
+    const history = this.hydrateQuizHistory(rows);
+
+    return rootIds.map((rootSessionId) => {
+      const attempts = history
+        .filter((attempt) => (attempt.rootSessionId ?? attempt.id) === rootSessionId)
+        .sort((left, right) => left.completedAt.localeCompare(right.completedAt) || left.id - right.id);
+      const rootAttempt = attempts.find((attempt) => attempt.id === rootSessionId) ?? attempts[0];
+      const latestAttempt = attempts.at(-1) ?? rootAttempt;
+
+      return {
+        rootSessionId,
+        className: rootAttempt.className,
+        chapterNames: rootAttempt.chapterNames,
+        completedAt: latestAttempt.completedAt,
+        attempts
+      };
+    });
+  }
+
+  private listQuizHistoryRows(whereClause = "", parameters: number[] = []): QuizHistoryRow[] {
+    return this.db
       .prepare(
         `SELECT
           quiz_sessions.id,
@@ -618,11 +665,14 @@ export class StudyDatabase {
         JOIN classes ON classes.id = quiz_sessions.class_id
         LEFT JOIN quiz_session_chapters ON quiz_session_chapters.quiz_session_id = quiz_sessions.id
         LEFT JOIN chapters ON chapters.id = quiz_session_chapters.chapter_id
+        ${whereClause}
         GROUP BY quiz_sessions.id
-        ORDER BY quiz_sessions.completed_at DESC`
+        ORDER BY quiz_sessions.completed_at DESC, quiz_sessions.id DESC`
       )
-      .all() as unknown as QuizHistoryRow[];
+      .all(...parameters) as unknown as QuizHistoryRow[];
+  }
 
+  private hydrateQuizHistory(rows: QuizHistoryRow[]): QuizHistoryItem[] {
     const missedStatement = this.db.prepare(
       `SELECT
         questions.id as questionId,
