@@ -112,7 +112,10 @@ test("filters and renders performance reports without page overflow", async ({ p
   await page.goto("/");
   await page.getByRole("button", { name: /Reports/ }).click();
   await expect(page.getByText("First-pass accuracy", { exact: true })).toBeVisible();
-  await expect(page.locator(".metric").filter({ hasText: "First-pass accuracy" }).locator("strong")).toHaveText("70%");
+  await expect(page.locator(".report-primary-kpi").filter({ hasText: "First-pass accuracy" }).locator("strong")).toHaveText(
+    "70%"
+  );
+  await expect(page.getByText("Updated from 1 attempt", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Accuracy over time" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Weak and repeated questions" })).toBeVisible();
   await expect(page.getByText("What is two plus two?", { exact: true })).toBeVisible();
@@ -120,6 +123,19 @@ test("filters and renders performance reports without page overflow", async ({ p
   await page.getByLabel("Class").selectOption("1");
   await expect(page.getByLabel("Chapter")).toBeEnabled();
   await expect(page.getByLabel("Chapter").getByRole("option", { name: "Chapter 1" })).toHaveCount(1);
+  const presetRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return url.pathname === "/api/reports/performance" && url.searchParams.has("from") && url.searchParams.has("to");
+  });
+  await page.getByRole("button", { name: "30 days" }).click();
+  await presetRequest;
+  await expect(page.getByRole("button", { name: "30 days" })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Custom" }).click();
+  await expect(page.getByLabel("From")).toBeVisible();
+  await expect(page.getByLabel("To")).toBeVisible();
+  await page.getByRole("button", { name: "Reset view" }).click();
+  await expect(page.getByRole("button", { name: "All time" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("From")).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 1000 });
   await expect

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { CircleAlert, CircleCheck, RotateCcw, TrendingUp } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -12,9 +13,10 @@ import {
   YAxis
 } from "recharts";
 import { getPerformanceReport, listClasses } from "../api";
-import { Metric } from "../components/Metric";
 import { formatDateTime } from "../utils/formatDateTime";
 import type { PerformanceReport, PerformanceReportFilters, StoredClass } from "../../shared/types";
+
+type DatePreset = "30_days" | "90_days" | "all_time" | "custom";
 
 const DEFAULT_FILTERS: PerformanceReportFilters = {
   classId: null,
@@ -35,9 +37,17 @@ function percent(value: number) {
   return `${value.toFixed(value % 1 === 0 ? 0 : 1)}%`;
 }
 
+function toDateInputValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export function ReportsView({ classesVersion }: { classesVersion: number }) {
   const [classes, setClasses] = useState<StoredClass[]>([]);
   const [filters, setFilters] = useState<PerformanceReportFilters>(DEFAULT_FILTERS);
+  const [datePreset, setDatePreset] = useState<DatePreset>("all_time");
   const [report, setReport] = useState<PerformanceReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -81,85 +91,175 @@ export function ReportsView({ classesVersion }: { classesVersion: number }) {
     label: filters.classId === null ? `${chapter.className} · ${chapter.chapterName}` : chapter.chapterName
   }));
   const totalPages = report ? Math.max(1, Math.ceil(report.attempts.total / report.attempts.pageSize)) : 1;
+  const selectedChapter = selectedClass?.chapters.find((chapter) => chapter.id === filters.chapterId) ?? null;
+  const originalAttemptCount = report?.trend.filter((point) => point.attemptType === "original").length ?? 0;
+  const scopeLabel = selectedClass
+    ? selectedChapter
+      ? `${selectedClass.name} · ${selectedChapter.name}`
+      : selectedClass.name
+    : "All classes";
+  const dateLabel =
+    datePreset === "30_days"
+      ? "Last 30 days"
+      : datePreset === "90_days"
+        ? "Last 90 days"
+        : datePreset === "custom"
+          ? `${filters.from ?? "Start"} – ${filters.to ?? "Today"}`
+          : "All time";
 
   const updateFilters = (changes: Partial<PerformanceReportFilters>) => {
     setFilters((current) => ({ ...current, ...changes, page: changes.page ?? 1 }));
   };
 
+  const applyDatePreset = (preset: DatePreset) => {
+    setDatePreset(preset);
+    if (preset === "custom") return;
+    if (preset === "all_time") {
+      updateFilters({ from: null, to: null });
+      return;
+    }
+
+    const to = new Date();
+    const from = new Date(to);
+    from.setDate(from.getDate() - (preset === "30_days" ? 29 : 89));
+    updateFilters({ from: toDateInputValue(from), to: toDateInputValue(to) });
+  };
+
+  const resetFilters = () => {
+    setDatePreset("all_time");
+    setFilters(DEFAULT_FILTERS);
+  };
+
   return (
     <section className="tool-page reports-page">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Long-term analysis</p>
-          <h2>Performance Reports</h2>
-          <p className="page-description">Analyze first-pass performance, mastery, retests, and weak areas.</p>
-        </div>
-      </header>
+      <section className="report-hero">
+        <header className="report-hero-heading">
+          <div>
+            <p className="eyebrow">Long-term analysis</p>
+            <h2>Performance Reports</h2>
+            <p className="page-description">See what is sticking, where you are improving, and what to review next.</p>
+          </div>
+          {report && (
+            <span className="report-updated-badge">
+              <span aria-hidden="true" /> Updated from {report.attempts.total}{" "}
+              {report.attempts.total === 1 ? "attempt" : "attempts"}
+            </span>
+          )}
+        </header>
 
-      <section className="panel report-filters" aria-label="Report filters">
-        <label>
-          Class
-          <select
-            value={filters.classId ?? ""}
-            onChange={(event) =>
-              updateFilters({ classId: event.target.value ? Number(event.target.value) : null, chapterId: null })
-            }
-          >
-            <option value="">All classes</option>
-            {classes.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Chapter
-          <select
-            value={filters.chapterId ?? ""}
-            disabled={selectedClass === null}
-            onChange={(event) => updateFilters({ chapterId: event.target.value ? Number(event.target.value) : null })}
-          >
-            <option value="">All chapters</option>
-            {selectedClass?.chapters.map((chapter) => (
-              <option key={chapter.id} value={chapter.id}>
-                {chapter.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          From
-          <input
-            type="date"
-            value={filters.from ?? ""}
-            onChange={(event) => updateFilters({ from: event.target.value || null })}
-          />
-        </label>
-        <label>
-          To
-          <input
-            type="date"
-            value={filters.to ?? ""}
-            onChange={(event) => updateFilters({ to: event.target.value || null })}
-          />
-        </label>
-        <label>
-          Attempt type
-          <select
-            value={filters.attemptType}
-            onChange={(event) =>
-              updateFilters({ attemptType: event.target.value as PerformanceReportFilters["attemptType"] })
-            }
-          >
-            <option value="all">Originals and retests</option>
-            <option value="original">Original attempts</option>
-            <option value="retry">Retests only</option>
-          </select>
-        </label>
-        <button className="ghost-action report-reset" onClick={() => setFilters(DEFAULT_FILTERS)}>
-          Reset filters
-        </button>
+        <div className="report-filter-grid" aria-label="Report filters">
+          <section className="report-filter-cluster report-scope-filter">
+            <span className="report-cluster-label">Study scope</span>
+            <div className="report-scope-controls">
+              <select
+                aria-label="Class"
+                value={filters.classId ?? ""}
+                onChange={(event) =>
+                  updateFilters({ classId: event.target.value ? Number(event.target.value) : null, chapterId: null })
+                }
+              >
+                <option value="">All classes</option>
+                {classes.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Chapter"
+                value={filters.chapterId ?? ""}
+                disabled={selectedClass === null}
+                onChange={(event) =>
+                  updateFilters({ chapterId: event.target.value ? Number(event.target.value) : null })
+                }
+              >
+                <option value="">All chapters</option>
+                {selectedClass?.chapters.map((chapter) => (
+                  <option key={chapter.id} value={chapter.id}>
+                    {chapter.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </section>
+
+          <section className="report-filter-cluster">
+            <span className="report-cluster-label">Time period</span>
+            <div className="report-segmented-control">
+              {[
+                ["30_days", "30 days"],
+                ["90_days", "90 days"],
+                ["all_time", "All time"],
+                ["custom", "Custom"]
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  className={datePreset === value ? "active" : ""}
+                  aria-pressed={datePreset === value}
+                  onClick={() => applyDatePreset(value as DatePreset)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="report-filter-cluster report-attempt-filter">
+            <span className="report-cluster-label">Attempt type</span>
+            <div className="report-segmented-control">
+              {[
+                ["all", "All"],
+                ["original", "Original"],
+                ["retry", "Retest"]
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  className={filters.attemptType === value ? "active" : ""}
+                  aria-pressed={filters.attemptType === value}
+                  onClick={() =>
+                    updateFilters({ attemptType: value as PerformanceReportFilters["attemptType"] })
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        {datePreset === "custom" && (
+          <div className="report-custom-date-row">
+            <label>
+              From
+              <input
+                type="date"
+                value={filters.from ?? ""}
+                onChange={(event) => updateFilters({ from: event.target.value || null })}
+              />
+            </label>
+            <label>
+              To
+              <input
+                type="date"
+                value={filters.to ?? ""}
+                onChange={(event) => updateFilters({ to: event.target.value || null })}
+              />
+            </label>
+          </div>
+        )}
+
+        <div className="report-active-filters">
+          <span className="report-filter-chip">{scopeLabel}</span>
+          <span className="report-filter-chip">{dateLabel}</span>
+          {filters.attemptType !== "all" && (
+            <span className="report-filter-chip">
+              {filters.attemptType === "original" ? "Original attempts" : "Retests only"}
+            </span>
+          )}
+          <button className="report-reset-link" onClick={resetFilters}>
+            Reset view
+          </button>
+        </div>
       </section>
 
       {error && <div className="notice error">{error}</div>}
@@ -167,15 +267,70 @@ export function ReportsView({ classesVersion }: { classesVersion: number }) {
 
       {report && (
         <>
-          <div className="report-kpi-grid">
-            <Metric label="First-pass accuracy" value={percent(report.kpis.firstPassAccuracy)} />
-            <Metric label="Latest mastery" value={percent(report.kpis.latestMastery)} />
-            <Metric label="Questions answered" value={report.kpis.questionsAnswered} />
-            <Metric label="Avg / question" value={`${report.kpis.averageSecondsPerQuestion.toFixed(1)}s`} />
-            <Metric label="Weighted accuracy" value={percent(report.kpis.weightedAccuracy)} />
-            <Metric label="Retry recovery" value={percent(report.kpis.retryRecovery)} />
-            <Metric label="Attempts" value={report.kpis.attempts} />
-            <Metric label="Unresolved questions" value={report.kpis.unresolvedQuestions} />
+          <div className="report-primary-kpis">
+            <article
+              className="report-primary-kpi"
+              style={{ "--report-accent": "#4f46e5", "--report-tint": "#eeedff" } as CSSProperties}
+            >
+              <div className="report-kpi-label">
+                <span>First-pass accuracy</span>
+                <span className="report-kpi-icon"><TrendingUp size={17} /></span>
+              </div>
+              <strong>{percent(report.kpis.firstPassAccuracy)}</strong>
+              <small>{originalAttemptCount} original {originalAttemptCount === 1 ? "attempt" : "attempts"} in this view</small>
+            </article>
+            <article
+              className="report-primary-kpi"
+              style={{ "--report-accent": "#0d9488", "--report-tint": "#e3f7f4" } as CSSProperties}
+            >
+              <div className="report-kpi-label">
+                <span>Latest mastery</span>
+                <span className="report-kpi-icon"><CircleCheck size={17} /></span>
+              </div>
+              <strong>{percent(report.kpis.latestMastery)}</strong>
+              <small>
+                {report.kpis.unresolvedQuestions === 0
+                  ? "All currently answered questions resolved"
+                  : `${report.kpis.unresolvedQuestions} unresolved questions`}
+              </small>
+            </article>
+            <article
+              className="report-primary-kpi"
+              style={{ "--report-accent": "#d97706", "--report-tint": "#fff3e3" } as CSSProperties}
+            >
+              <div className="report-kpi-label">
+                <span>Retry recovery</span>
+                <span className="report-kpi-icon"><RotateCcw size={17} /></span>
+              </div>
+              <strong>{percent(report.kpis.retryRecovery)}</strong>
+              <small>
+                {report.retryFunnel.recovered === 0
+                  ? "No recovered retests in this view"
+                  : `${report.retryFunnel.recovered} recovered through focused retests`}
+              </small>
+            </article>
+            <article
+              className="report-primary-kpi"
+              style={{ "--report-accent": "#e11d48", "--report-tint": "#fff0f3" } as CSSProperties}
+            >
+              <div className="report-kpi-label">
+                <span>Needs attention</span>
+                <span className="report-kpi-icon"><CircleAlert size={17} /></span>
+              </div>
+              <strong>{report.kpis.unresolvedQuestions}</strong>
+              <small>
+                {report.kpis.unresolvedQuestions === 0
+                  ? "No unresolved questions"
+                  : "Questions whose latest answer was missed"}
+              </small>
+            </article>
+          </div>
+
+          <div className="report-secondary-stats">
+            <div><strong>{report.kpis.questionsAnswered.toLocaleString()}</strong><span>questions answered</span></div>
+            <div><strong>{report.kpis.averageSecondsPerQuestion.toFixed(1)}s</strong><span>average response</span></div>
+            <div><strong>{report.kpis.attempts}</strong><span>attempts</span></div>
+            <div><strong>{percent(report.kpis.weightedAccuracy)}</strong><span>weighted accuracy</span></div>
           </div>
 
           {report.kpis.questionsAnswered === 0 ? (
