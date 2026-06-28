@@ -132,6 +132,98 @@ export interface QuizHistoryGroup {
   attempts: QuizHistoryItem[];
 }
 
+export type ReportAttemptType = "all" | "original" | "retry";
+
+export interface PerformanceReportFilters {
+  classId: number | null;
+  chapterId: number | null;
+  from: string | null;
+  to: string | null;
+  attemptType: ReportAttemptType;
+  page: number;
+  pageSize: number;
+}
+
+export interface PerformanceReportKpis {
+  attempts: number;
+  questionsAnswered: number;
+  weightedAccuracy: number;
+  firstPassAccuracy: number;
+  latestMastery: number;
+  averageSecondsPerQuestion: number;
+  retryRecovery: number;
+  unresolvedQuestions: number;
+}
+
+export interface ReportTrendPoint {
+  sessionId: number;
+  completedAt: string;
+  attemptType: Exclude<ReportAttemptType, "all">;
+  accuracy: number;
+  questionsAnswered: number;
+}
+
+export interface ReportActivityPoint {
+  date: string;
+  correct: number;
+  incorrect: number;
+}
+
+export interface ReportChapterPerformance {
+  chapterId: number;
+  className: string;
+  chapterName: string;
+  questionsAnswered: number;
+  accuracy: number;
+  latestMastery: number;
+  unresolvedQuestions: number;
+}
+
+export interface ReportRetryFunnel {
+  missed: number;
+  retested: number;
+  recovered: number;
+  stillMissed: number;
+}
+
+export interface ReportWeakQuestion {
+  questionId: number;
+  className: string;
+  chapterName: string;
+  prompt: string;
+  answers: number;
+  misses: number;
+  latestCorrect: boolean;
+  averageSeconds: number;
+}
+
+export interface ReportAttemptItem {
+  id: number;
+  parentSessionId: number | null;
+  rootSessionId: number | null;
+  className: string;
+  chapterNames: string[];
+  completedAt: string;
+  totalQuestions: number;
+  correctCount: number;
+  averageSecondsPerQuestion: number;
+}
+
+export interface PerformanceReport {
+  kpis: PerformanceReportKpis;
+  trend: ReportTrendPoint[];
+  activity: ReportActivityPoint[];
+  chapters: ReportChapterPerformance[];
+  retryFunnel: ReportRetryFunnel;
+  weakQuestions: ReportWeakQuestion[];
+  attempts: {
+    items: ReportAttemptItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+  };
+}
+
 export interface MissedQuestionQuiz {
   sourceSessionId: number;
   rootSessionId: number;

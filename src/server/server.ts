@@ -23,6 +23,19 @@ const args = new Map(
 );
 const port = Number(args.get("port") ?? process.env.PORT ?? 4173);
 const isProduction = process.env.NODE_ENV === "production";
+const optionalPositiveInteger = z.preprocess(
+  (value) => (value === undefined || value === "" ? undefined : value),
+  z.coerce.number().int().positive().optional()
+);
+const performanceReportQuerySchema = z.object({
+  classId: optionalPositiveInteger,
+  chapterId: optionalPositiveInteger,
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  attemptType: z.enum(["all", "original", "retry"]).default("all"),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25)
+});
 
 const app = express();
 const database = new StudyDatabase(process.env.STUDY_DB_PATH ?? "data/study.sqlite");
@@ -94,6 +107,26 @@ app.get("/api/history", (_request, response) => {
 
 app.get("/api/history/recent", (_request, response) => {
   response.json(database.listRecentQuizHistory());
+});
+
+app.get("/api/reports/performance", (request, response) => {
+  const parsed = performanceReportQuerySchema.safeParse(request.query);
+  if (!parsed.success) {
+    response.status(400).json({ error: "Report filters are invalid." });
+    return;
+  }
+
+  response.json(
+    database.getPerformanceReport({
+      classId: parsed.data.classId ?? null,
+      chapterId: parsed.data.chapterId ?? null,
+      from: parsed.data.from ?? null,
+      to: parsed.data.to ?? null,
+      attemptType: parsed.data.attemptType,
+      page: parsed.data.page,
+      pageSize: parsed.data.pageSize
+    })
+  );
 });
 
 app.get("/api/questions", (request, response) => {

@@ -4,11 +4,18 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   ChoiceInput,
   MissedQuestionQuiz,
+  PerformanceReport,
+  PerformanceReportFilters,
   QuestionInput,
   QuizHistoryGroup,
   QuizSessionInput,
   QuizHistoryItem,
   QuizHistoryMissedQuestion,
+  ReportActivityPoint,
+  ReportAttemptItem,
+  ReportChapterPerformance,
+  ReportTrendPoint,
+  ReportWeakQuestion,
   SourceStatus,
   StoredChapter,
   StoredClass,
@@ -179,6 +186,23 @@ export class StudyDatabase {
 
     this.migrateQuestionDuplicatePolicy();
     this.migrateQuizSessionLineage();
+    this.migrateReportingIndexes();
+  }
+
+  private migrateReportingIndexes() {
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS quiz_sessions_class_completed_at
+      ON quiz_sessions(class_id, completed_at);
+
+      CREATE INDEX IF NOT EXISTS quiz_answers_quiz_session_id
+      ON quiz_answers(quiz_session_id);
+
+      CREATE INDEX IF NOT EXISTS quiz_answers_question_id
+      ON quiz_answers(question_id);
+
+      CREATE INDEX IF NOT EXISTS questions_class_chapter
+      ON questions(class_id, chapter_id);
+    `);
   }
 
   private migrateQuizSessionLineage() {
@@ -705,6 +729,297 @@ export class StudyDatabase {
       chapterNames: row.chapterNames ? row.chapterNames.split("||") : [],
       missedQuestions: missedStatement.all(row.id) as unknown as QuizHistoryMissedQuestion[]
     }));
+  }
+
+  getPerformanceReport(filters: PerformanceReportFilters): PerformanceReport {
+    const { whereClause, parameters } = this.buildReportFilter(filters);
+    const joins = `
+      FROM quiz_answers qa
+      JOIN quiz_sessions qs ON qs.id = qa.quiz_session_id
+      JOIN questions q ON q.id = qa.question_id
+      JOIN chapters ch ON ch.id = q.chapter_id
+      JOIN classes c ON c.id = q.class_id`;
+
+    const summary = this.db
+      .prepare(
+        `SELECT
+          COUNT(DISTINCT qs.id) as attempts,
+          COUNT(*) as questionsAnswered,
+          COALESCE(100.0 * SUM(qa.is_correct) / NULLIF(COUNT(*), 0), 0) as weightedAccuracy,
+          COALESCE(
+            100.0 * SUM(CASE WHEN qs.parent_session_id IS NULL THEN qa.is_correct ELSE 0 END) /
+            NULLIF(SUM(CASE WHEN qs.parent_session_id IS NULL THEN 1 ELSE 0 END), 0),
+            0
+          ) as firstPassAccuracy,
+          COALESCE(SUM(qa.time_ms) / 1000.0 / NULLIF(COUNT(*), 0), 0) as averageSecondsPerQuestion,
+          COALESCE(
+            100.0 * SUM(CASE WHEN qs.parent_session_id IS NOT NULL THEN qa.is_correct ELSE 0 END) /
+            NULLIF(SUM(CASE WHEN qs.parent_session_id IS NOT NULL THEN 1 ELSE 0 END), 0),
+            0
+          ) as retryRecovery
+        ${joins}
+        ${whereClause}`
+      )
+      .get(...parameters) as {
+      attempts: number;
+      questionsAnswered: number;
+      weightedAccuracy: number;
+      firstPassAccuracy: number;
+      averageSecondsPerQuestion: number;
+      retryRecovery: number;
+    };
+
+    const mastery = this.db
+      .prepare(
+        `WITH filtered_answers AS (
+          SELECT
+            q.id as questionId,
+            qa.is_correct as isCorrect,
+            ROW_NUMBER() OVER (
+              PARTITION BY q.id
+              ORDER BY qs.completed_at DESC, qa.id DESC
+            ) as recency
+          ${joins}
+          ${whereClause}
+        )
+        SELECT
+          COUNT(*) as questions,
+          COALESCE(SUM(isCorrect), 0) as correct
+        FROM filtered_answers
+        WHERE recency = 1`
+      )
+      .get(...parameters) as { questions: number; correct: number };
+
+    const trend = this.db
+      .prepare(
+        `SELECT * FROM (
+          SELECT
+            qs.id as sessionId,
+            qs.completed_at as completedAt,
+            CASE WHEN qs.parent_session_id IS NULL THEN 'original' ELSE 'retry' END as attemptType,
+            100.0 * SUM(qa.is_correct) / COUNT(*) as accuracy,
+            COUNT(*) as questionsAnswered
+          ${joins}
+          ${whereClause}
+          GROUP BY qs.id
+          ORDER BY qs.completed_at DESC, qs.id DESC
+          LIMIT 100
+        )
+        ORDER BY completedAt, sessionId`
+      )
+      .all(...parameters) as unknown as ReportTrendPoint[];
+
+    const activity = this.db
+      .prepare(
+        `SELECT
+          substr(qs.completed_at, 1, 10) as date,
+          SUM(qa.is_correct) as correct,
+          COUNT(*) - SUM(qa.is_correct) as incorrect
+        ${joins}
+        ${whereClause}
+        GROUP BY substr(qs.completed_at, 1, 10)
+        ORDER BY date`
+      )
+      .all(...parameters) as unknown as ReportActivityPoint[];
+
+    const chapters = this.db
+      .prepare(
+        `WITH filtered_answers AS (
+          SELECT
+            ch.id as chapterId,
+            c.name as className,
+            ch.name as chapterName,
+            q.id as questionId,
+            qa.is_correct as isCorrect,
+            ROW_NUMBER() OVER (
+              PARTITION BY q.id
+              ORDER BY qs.completed_at DESC, qa.id DESC
+            ) as recency
+          ${joins}
+          ${whereClause}
+        )
+        SELECT
+          chapterId,
+          className,
+          chapterName,
+          COUNT(*) as questionsAnswered,
+          100.0 * SUM(isCorrect) / COUNT(*) as accuracy,
+          COALESCE(
+            100.0 * SUM(CASE WHEN recency = 1 THEN isCorrect ELSE 0 END) /
+            NULLIF(SUM(CASE WHEN recency = 1 THEN 1 ELSE 0 END), 0),
+            0
+          ) as latestMastery,
+          SUM(CASE WHEN recency = 1 AND isCorrect = 0 THEN 1 ELSE 0 END) as unresolvedQuestions
+        FROM filtered_answers
+        GROUP BY chapterId, className, chapterName
+        ORDER BY latestMastery, questionsAnswered DESC, className, chapterName`
+      )
+      .all(...parameters) as unknown as ReportChapterPerformance[];
+
+    const retryFunnel = this.db
+      .prepare(
+        `WITH filtered_answers AS (
+          SELECT
+            COALESCE(qs.root_session_id, qs.id) as rootSessionId,
+            q.id as questionId,
+            qs.parent_session_id as parentSessionId,
+            qa.is_correct as isCorrect,
+            ROW_NUMBER() OVER (
+              PARTITION BY COALESCE(qs.root_session_id, qs.id), q.id
+              ORDER BY qs.completed_at DESC, qa.id DESC
+            ) as recency
+          ${joins}
+          ${whereClause}
+        ), root_question_states AS (
+          SELECT
+            rootSessionId,
+            questionId,
+            MAX(CASE WHEN parentSessionId IS NULL AND isCorrect = 0 THEN 1 ELSE 0 END) as wasMissed,
+            MAX(CASE WHEN parentSessionId IS NOT NULL THEN 1 ELSE 0 END) as wasRetested,
+            MAX(CASE WHEN recency = 1 THEN isCorrect ELSE 0 END) as latestCorrect
+          FROM filtered_answers
+          GROUP BY rootSessionId, questionId
+        )
+        SELECT
+          COALESCE(SUM(wasMissed), 0) as missed,
+          COALESCE(SUM(CASE WHEN wasMissed = 1 AND wasRetested = 1 THEN 1 ELSE 0 END), 0) as retested,
+          COALESCE(SUM(CASE WHEN wasMissed = 1 AND wasRetested = 1 AND latestCorrect = 1 THEN 1 ELSE 0 END), 0) as recovered,
+          COALESCE(SUM(CASE WHEN wasMissed = 1 AND wasRetested = 1 AND latestCorrect = 0 THEN 1 ELSE 0 END), 0) as stillMissed
+        FROM root_question_states`
+      )
+      .get(...parameters) as unknown as PerformanceReport["retryFunnel"];
+
+    const weakQuestions = this.db
+      .prepare(
+        `WITH filtered_answers AS (
+          SELECT
+            q.id as questionId,
+            c.name as className,
+            ch.name as chapterName,
+            q.prompt,
+            qa.is_correct as isCorrect,
+            qa.time_ms as timeMs,
+            ROW_NUMBER() OVER (
+              PARTITION BY q.id
+              ORDER BY qs.completed_at DESC, qa.id DESC
+            ) as recency
+          ${joins}
+          ${whereClause}
+        )
+        SELECT
+          questionId,
+          className,
+          chapterName,
+          prompt,
+          COUNT(*) as answers,
+          SUM(CASE WHEN isCorrect = 0 THEN 1 ELSE 0 END) as misses,
+          MAX(CASE WHEN recency = 1 THEN isCorrect ELSE 0 END) as latestCorrect,
+          SUM(timeMs) / 1000.0 / COUNT(*) as averageSeconds
+        FROM filtered_answers
+        GROUP BY questionId, className, chapterName, prompt
+        HAVING misses > 0
+        ORDER BY latestCorrect, misses DESC, averageSeconds DESC
+        LIMIT 10`
+      )
+      .all(...parameters) as unknown as Array<Omit<ReportWeakQuestion, "latestCorrect"> & { latestCorrect: number }>;
+
+    const attemptTotal = this.db
+      .prepare(`SELECT COUNT(DISTINCT qs.id) as total ${joins} ${whereClause}`)
+      .get(...parameters) as { total: number };
+    const offset = (filters.page - 1) * filters.pageSize;
+    const attemptRows = this.db
+      .prepare(
+        `SELECT
+          qs.id,
+          qs.parent_session_id as parentSessionId,
+          qs.root_session_id as rootSessionId,
+          c.name as className,
+          GROUP_CONCAT(DISTINCT ch.name) as chapterNames,
+          qs.completed_at as completedAt,
+          COUNT(*) as totalQuestions,
+          SUM(qa.is_correct) as correctCount,
+          SUM(qa.time_ms) / 1000.0 / COUNT(*) as averageSecondsPerQuestion
+        ${joins}
+        ${whereClause}
+        GROUP BY qs.id, c.name
+        ORDER BY qs.completed_at DESC, qs.id DESC
+        LIMIT ? OFFSET ?`
+      )
+      .all(...parameters, filters.pageSize, offset) as unknown as Array<
+      Omit<ReportAttemptItem, "chapterNames"> & { chapterNames: string | null }
+    >;
+
+    const percentage = (numerator: number, denominator: number) =>
+      denominator === 0 ? 0 : Math.round((1000 * numerator) / denominator) / 10;
+    const rounded = (value: number) => Math.round(value * 10) / 10;
+
+    return {
+      kpis: {
+        attempts: summary.attempts,
+        questionsAnswered: summary.questionsAnswered,
+        weightedAccuracy: rounded(summary.weightedAccuracy),
+        firstPassAccuracy: rounded(summary.firstPassAccuracy),
+        latestMastery: percentage(mastery.correct, mastery.questions),
+        averageSecondsPerQuestion: rounded(summary.averageSecondsPerQuestion),
+        retryRecovery: rounded(summary.retryRecovery),
+        unresolvedQuestions: mastery.questions - mastery.correct
+      },
+      trend: trend.map((point) => ({ ...point, accuracy: rounded(point.accuracy) })),
+      activity,
+      chapters: chapters.map((chapter) => ({
+        ...chapter,
+        accuracy: rounded(chapter.accuracy),
+        latestMastery: rounded(chapter.latestMastery)
+      })),
+      retryFunnel,
+      weakQuestions: weakQuestions.map((question) => ({
+        ...question,
+        latestCorrect: Boolean(question.latestCorrect),
+        averageSeconds: rounded(question.averageSeconds)
+      })),
+      attempts: {
+        items: attemptRows.map((attempt) => ({
+          ...attempt,
+          chapterNames: attempt.chapterNames?.split(",") ?? [],
+          averageSecondsPerQuestion: rounded(attempt.averageSecondsPerQuestion)
+        })),
+        total: attemptTotal.total,
+        page: filters.page,
+        pageSize: filters.pageSize
+      }
+    };
+  }
+
+  private buildReportFilter(filters: PerformanceReportFilters) {
+    const conditions: string[] = [];
+    const parameters: Array<number | string> = [];
+
+    if (filters.classId !== null) {
+      conditions.push("q.class_id = ?");
+      parameters.push(filters.classId);
+    }
+    if (filters.chapterId !== null) {
+      conditions.push("q.chapter_id = ?");
+      parameters.push(filters.chapterId);
+    }
+    if (filters.from !== null) {
+      conditions.push("substr(qs.completed_at, 1, 10) >= ?");
+      parameters.push(filters.from);
+    }
+    if (filters.to !== null) {
+      conditions.push("substr(qs.completed_at, 1, 10) <= ?");
+      parameters.push(filters.to);
+    }
+    if (filters.attemptType === "original") {
+      conditions.push("qs.parent_session_id IS NULL");
+    } else if (filters.attemptType === "retry") {
+      conditions.push("qs.parent_session_id IS NOT NULL");
+    }
+
+    return {
+      whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "",
+      parameters
+    };
   }
 
   getMissedQuestionQuiz(sessionId: number): MissedQuestionQuiz | null {

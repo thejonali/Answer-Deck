@@ -210,6 +210,68 @@ describe("study database imports", () => {
         grandchild.sessionId
       ]);
       expect(recentHistory[0].attempts.map((item) => item.incorrectCount)).toEqual([1, 1, 0]);
+
+      const report = database.getPerformanceReport({
+        classId: null,
+        chapterId: null,
+        from: null,
+        to: null,
+        attemptType: "all",
+        page: 1,
+        pageSize: 25
+      });
+      expect(report.kpis).toEqual({
+        attempts: 3,
+        questionsAnswered: 4,
+        weightedAccuracy: 50,
+        firstPassAccuracy: 50,
+        latestMastery: 100,
+        averageSecondsPerQuestion: 0.8,
+        retryRecovery: 50,
+        unresolvedQuestions: 0
+      });
+      expect(report.trend.map((point) => point.attemptType)).toEqual(["original", "retry", "retry"]);
+      expect(report.activity).toEqual([{ date: "2026-06-27", correct: 2, incorrect: 2 }]);
+      expect(report.chapters).toEqual([
+        expect.objectContaining({
+          chapterName: "Chapter 5",
+          questionsAnswered: 4,
+          accuracy: 50,
+          latestMastery: 100,
+          unresolvedQuestions: 0
+        })
+      ]);
+      expect(report.retryFunnel).toEqual({ missed: 1, retested: 1, recovered: 1, stillMissed: 0 });
+      expect(report.weakQuestions).toEqual([
+        expect.objectContaining({ questionId: missedQuestion.id, answers: 3, misses: 2, latestCorrect: true })
+      ]);
+      expect(report.attempts.items.map((attempt) => attempt.id)).toEqual([
+        grandchild.sessionId,
+        child.sessionId,
+        root.sessionId
+      ]);
+
+      const originalReport = database.getPerformanceReport({
+        classId: savedImport.classId,
+        chapterId: savedImport.chapterId,
+        from: "2026-06-27",
+        to: "2026-06-27",
+        attemptType: "original",
+        page: 1,
+        pageSize: 1
+      });
+      expect(originalReport.kpis).toEqual(
+        expect.objectContaining({
+          attempts: 1,
+          questionsAnswered: 2,
+          weightedAccuracy: 50,
+          latestMastery: 50,
+          retryRecovery: 0,
+          unresolvedQuestions: 1
+        })
+      );
+      expect(originalReport.attempts.total).toBe(1);
+      expect(originalReport.attempts.items).toHaveLength(1);
     } finally {
       database.close();
     }

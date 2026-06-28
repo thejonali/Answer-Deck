@@ -1,6 +1,8 @@
 import type {
   ImportPreview,
   MissedQuestionQuiz,
+  PerformanceReport,
+  PerformanceReportFilters,
   QuestionInput,
   QuizHistoryGroup,
   QuizHistoryItem,
@@ -76,6 +78,19 @@ export function listHistory() {
 
 export function listRecentHistory() {
   return request<QuizHistoryGroup[]>("/api/history/recent");
+}
+
+export function getPerformanceReport(filters: PerformanceReportFilters) {
+  const params = new URLSearchParams({
+    attemptType: filters.attemptType,
+    page: String(filters.page),
+    pageSize: String(filters.pageSize)
+  });
+  if (filters.classId !== null) params.set("classId", String(filters.classId));
+  if (filters.chapterId !== null) params.set("chapterId", String(filters.chapterId));
+  if (filters.from !== null) params.set("from", filters.from);
+  if (filters.to !== null) params.set("to", filters.to);
+  return request<PerformanceReport>(`/api/reports/performance?${params}`);
 }
 
 export function renameClass(classId: number, name: string) {
