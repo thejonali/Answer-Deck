@@ -832,6 +832,19 @@ pre {
   gap: 8px;
 }
 
+.quiz-progress-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+}
+
+.quiz-toolbar-action {
+  min-height: 36px;
+  width: 36px;
+  padding: 0;
+}
+
 .quiz-end-action {
   min-height: 36px;
   border: 0;
@@ -905,6 +918,10 @@ progress {
 .answer-button.selected {
   border-color: #2e6de8;
   box-shadow: 0 0 0 3px rgba(46, 109, 232, 0.12);
+}
+
+.answer-button.reviewed {
+  opacity: 1;
 }
 
 .answer-button.correct {

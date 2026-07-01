@@ -1,4 +1,4 @@
-import { BarChart3, Check, ChevronRight, Play, RotateCcw, X } from "lucide-react";
+import { BarChart3, Check, ChevronLeft, ChevronRight, Play, RotateCcw, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { getMissedQuestionQuiz, getQuestions, listClasses, saveQuizSession } from "../api";
@@ -161,12 +161,30 @@ export function QuizTool({
   }
 
   function answerQuestion(choiceId: number) {
-    if (!currentQuestion || currentAnswer) {
+    if (!currentQuestion || (currentAnswer && !reviewAtEnd)) {
       return;
     }
     const correctChoice = currentQuestion.choices.find((choice) => choice.isCorrect);
     if (!correctChoice) {
       setError("This question has no correct answer saved.");
+      return;
+    }
+    if (currentAnswer) {
+      setAnswers((current) =>
+        current.map((answer) =>
+          answer.questionId === currentQuestion.id
+            ? {
+                ...answer,
+                selectedChoiceId: choiceId,
+                correctChoiceId: correctChoice.id,
+                isCorrect: choiceId === correctChoice.id,
+                timeMs: answer.timeMs + Math.round(performance.now() - questionStartedAt)
+              }
+            : answer
+        )
+      );
+      setSelectedChoiceId(choiceId);
+      setQuestionStartedAt(performance.now());
       return;
     }
     const answer: QuizAnswerInput = {
@@ -185,7 +203,6 @@ export function QuizTool({
     }
 
     if (currentIndex + 1 >= quizQuestions.length) {
-      void finishQuiz(nextAnswers);
       return;
     }
 
@@ -201,6 +218,17 @@ export function QuizTool({
     }
     setCurrentIndex((value) => value + 1);
     setSelectedChoiceId(null);
+    setQuestionStartedAt(performance.now());
+  }
+
+  function previousQuestion() {
+    if (!reviewAtEnd || currentIndex === 0) {
+      return;
+    }
+    const previousIndex = currentIndex - 1;
+    const previousAnswer = answers.find((answer) => answer.questionId === quizQuestions[previousIndex].id);
+    setCurrentIndex(previousIndex);
+    setSelectedChoiceId(previousAnswer?.selectedChoiceId ?? null);
     setQuestionStartedAt(performance.now());
   }
 
@@ -412,7 +440,30 @@ export function QuizTool({
         <section className="quiz-stage">
           <div className="quiz-toolbar">
             <div className="quiz-progress">
-              <span>{currentIndex + 1} / {quizQuestions.length}</span>
+              <div className="quiz-progress-controls">
+                {reviewAtEnd && (
+                  <button
+                    className="ghost-action quiz-toolbar-action"
+                    onClick={previousQuestion}
+                    disabled={currentIndex === 0}
+                    aria-label="Previous question"
+                    title="Previous question"
+                  >
+                    <ChevronLeft size={17} />
+                  </button>
+                )}
+                <span>{currentIndex + 1} / {quizQuestions.length}</span>
+                {reviewAtEnd && currentAnswer && (
+                  <button
+                    className={`${currentIndex + 1 === quizQuestions.length ? "primary-action" : "ghost-action"} quiz-toolbar-action`}
+                    onClick={nextQuestion}
+                    aria-label={currentIndex + 1 === quizQuestions.length ? "Finish quiz" : "Next question"}
+                    title={currentIndex + 1 === quizQuestions.length ? "Finish quiz" : "Next question"}
+                  >
+                    <ChevronRight size={17} />
+                  </button>
+                )}
+              </div>
               <progress aria-label="Quiz progress" value={currentIndex + 1} max={quizQuestions.length} />
             </div>
             <button className="quiz-end-action" onClick={endQuiz}>End quiz</button>
@@ -422,13 +473,14 @@ export function QuizTool({
             <h3>{currentQuestion.prompt}</h3>
             <div className="answer-grid">
               {currentQuestion.choices.map((choice, index) => {
-                const isSelected = selectedChoiceId === choice.id;
+                const isSelected = (currentAnswer?.selectedChoiceId ?? selectedChoiceId) === choice.id;
                 const isAnswered = Boolean(currentAnswer);
                 const className = [
                   "answer-button",
                   isSelected ? "selected" : "",
-                  isAnswered && choice.isCorrect ? "correct" : "",
-                  isAnswered && isSelected && !choice.isCorrect ? "wrong" : ""
+                  isAnswered && reviewAtEnd ? "reviewed" : "",
+                  isAnswered && !reviewAtEnd && choice.isCorrect ? "correct" : "",
+                  isAnswered && !reviewAtEnd && isSelected && !choice.isCorrect ? "wrong" : ""
                 ]
                   .filter(Boolean)
                   .join(" ");
@@ -437,7 +489,7 @@ export function QuizTool({
                     key={choice.id}
                     className={className}
                     onClick={() => answerQuestion(choice.id)}
-                    disabled={isAnswered}
+                    disabled={isAnswered && !reviewAtEnd}
                   >
                     <span>{index + 1}</span>
                     {choice.text}

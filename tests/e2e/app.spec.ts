@@ -220,6 +220,99 @@ test("uses a subdued end action and discards a quiz ended early", async ({ page 
   expect(sessionWasSaved).toBe(false);
 });
 
+test("uses toolbar navigation for review-at-end quizzes", async ({ page }) => {
+  let savedSessionCount = 0;
+  const savedAnswers: Array<{ questionId: number; selectedChoiceId: number; isCorrect: boolean }> = [];
+  await page.route("**/api/classes", (route) =>
+    route.fulfill({
+      json: [{ id: 1, name: "Math", chapters: [{ id: 10, classId: 1, name: "Chapter 1", questionCount: 2 }] }]
+    })
+  );
+  await page.route("**/api/questions?*", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 100,
+          classId: 1,
+          chapterId: 10,
+          className: "Math",
+          chapterName: "Chapter 1",
+          type: "multiple_choice",
+          prompt: "What is two plus two?",
+          sourceQuestionNumber: 1,
+          sourceStatus: "UNKNOWN",
+          sourceSelectedAnswer: null,
+          choices: [
+            { id: 1000, questionId: 100, label: "A", text: "4", sortOrder: 0, isCorrect: true },
+            { id: 1001, questionId: 100, label: "B", text: "5", sortOrder: 1, isCorrect: false }
+          ]
+        },
+        {
+          id: 101,
+          classId: 1,
+          chapterId: 10,
+          className: "Math",
+          chapterName: "Chapter 1",
+          type: "multiple_choice",
+          prompt: "What is three plus three?",
+          sourceQuestionNumber: 2,
+          sourceStatus: "UNKNOWN",
+          sourceSelectedAnswer: null,
+          choices: [
+            { id: 1010, questionId: 101, label: "A", text: "6", sortOrder: 0, isCorrect: true },
+            { id: 1011, questionId: 101, label: "B", text: "7", sortOrder: 1, isCorrect: false }
+          ]
+        }
+      ]
+    })
+  );
+  await page.route("**/api/quiz-sessions", async (route) => {
+    const body = route.request().postDataJSON() as { answers: typeof savedAnswers };
+    savedSessionCount += 1;
+    savedAnswers.push(...body.answers);
+    return route.fulfill({ json: { sessionId: 1 } });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /Practice/ }).click();
+  await page.getByLabel("Class").selectOption("1");
+  await page.getByText("Chapter 1", { exact: true }).click();
+  await page.getByLabel("Review at end").check();
+  await page.getByLabel("Shuffle questions").uncheck();
+  await page.getByLabel("Scramble answers").uncheck();
+  await page.getByRole("button", { name: "Start quiz" }).click();
+
+  await expect(page.getByRole("button", { name: "Previous question" })).toBeDisabled();
+  await page.locator(".answer-button").filter({ hasText: /^1\s*4$/ }).click();
+  await expect(page.getByRole("heading", { name: "What is three plus three?" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Previous question" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Previous question" }).click();
+  await expect(page.getByRole("heading", { name: "What is two plus two?" })).toBeVisible();
+  await expect(page.locator(".answer-button").filter({ hasText: /^1\s*4$/ })).toHaveClass(/selected/);
+  await expect(page.locator(".answer-button.correct, .answer-button.wrong")).toHaveCount(0);
+  await page.locator(".answer-button").filter({ hasText: /^2\s*5$/ }).click();
+  await expect(page.locator(".answer-button").filter({ hasText: /^2\s*5$/ })).toHaveClass(/selected/);
+  await expect(page.getByRole("heading", { name: "What is two plus two?" })).toBeVisible();
+  await page.getByRole("button", { name: "Next question" }).click();
+
+  await page.locator(".answer-button").filter({ hasText: /^1\s*6$/ }).click();
+  await expect(page.getByRole("heading", { name: "What is three plus three?" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Finish quiz" })).toBeVisible();
+  expect(savedSessionCount).toBe(0);
+
+  await page.getByRole("button", { name: "Previous question" }).click();
+  await page.getByRole("button", { name: "Next question" }).click();
+  await page.getByRole("button", { name: "Finish quiz" }).click();
+  await expect(page.getByText("Session results", { exact: true })).toBeVisible();
+  expect(savedSessionCount).toBe(1);
+  expect(savedAnswers).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ questionId: 100, selectedChoiceId: 1001, isCorrect: false })
+    ])
+  );
+});
+
 test("retries missed answers from session results and records the source attempt", async ({ page }) => {
   const sessionBodies: Array<{ parentSessionId: number | null }> = [];
   const quizQuestion = {
